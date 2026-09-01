@@ -1,0 +1,39 @@
+name: Testing Auto Update Website Data
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-data:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Fetch fresh data
+        run: |
+          curl --fail --show-error --location --retry 3 \
+            "https://raw.githubusercontent.com/alexje76/Mbari_Wec_Compare/main/DashboardFiles/Tester.yaml" \
+            --output Tester.yaml
+
+      - name: Commit and push changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Tester.yaml
+
+          if git diff --cached --quiet; then
+            echo "No changes detected."
+            exit 0
+          fi
+
+          git commit -m "Automated data update"
+          git push origin "HEAD:${{ github.event.repository.default_branch }}"

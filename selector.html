@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Buoy Dashboard - Selector Display</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/charts.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Navigation Header -->
+        <header class="header">
+            <div class="header-content">
+                <button id="menuToggle" class="menu-toggle" aria-label="Toggle navigation menu">☰</button>
+                <h1>Buoy Dashboard</h1>
+            </div>
+        </header>
+
+        <!-- Navigation Menu -->
+        <nav id="navigationMenu" class="nav-menu nav-menu-closed">
+            <ul>
+                <li><a href="index.html" data-page="home">Homepage</a></li>
+                <li><a href="selector.html" data-page="selector">Selector Display</a></li>
+                <li><a href="power.html" data-page="power">Power Usage</a></li>
+                <li><a href="nextwave.html" data-page="nextwave">Next Wave</a></li>
+            </ul>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Date Range Picker -->
+            <div class="date-range-section">
+                <label>Date Range:</label>
+                <div id="dateRangePicker" class="date-range-picker">
+                    <input type="date" id="startDate" class="date-input">
+                    <span class="date-separator">–</span>
+                    <input type="date" id="endDate" class="date-input">
+                    <button id="applyDateRange" class="btn-apply">Apply</button>
+                    <button id="resetDateRange" class="btn-reset">All Available</button>
+                </div>
+            </div>
+
+            <!-- Main Layout: Left (30%) Filters | Right (70%) Charts -->
+            <div class="selector-layout">
+                <!-- Left Column: Filters -->
+                <aside class="selector-left">
+                    <div class="filter-section">
+                        <h3>Controller Selector</h3>
+                        <div id="controllerCheckboxes" class="checkbox-group">
+                            <!-- Populated by JavaScript -->
+                        </div>
+                    </div>
+
+                    <div class="filter-section">
+                        <h3>Chart Type Selector</h3>
+                        <div id="chartTypeSelectors" class="chart-type-selectors">
+                            <!-- Populated by JavaScript -->
+                        </div>
+                    </div>
+
+                    <div class="filter-section">
+                        <h3>Sea State Selector</h3>
+                        <div id="seaStateScatter" class="chart"></div>
+                        <div class="sea-state-legend">
+                            <p><span class="legend-filled">●</span> In current range</p>
+                            <p><span class="legend-hollow">◯</span> Not in range</p>
+                        </div>
+                    </div>
+                </aside>
+
+                <!-- Right Column: Charts -->
+                <section class="selector-right">
+                    <div id="chartsContainer" class="charts-container">
+                        <!-- Chart 1 -->
+                        <div class="chart-container stacked-chart">
+                            <h3 id="chart1Title">Avg Power</h3>
+                            <div id="chart1" class="chart"></div>
+                        </div>
+
+                        <!-- Chart 2 -->
+                        <div class="chart-container stacked-chart">
+                            <h3 id="chart2Title">Efficiency</h3>
+                            <div id="chart2" class="chart"></div>
+                        </div>
+
+                        <!-- Chart 3 -->
+                        <div class="chart-container stacked-chart">
+                            <h3 id="chart3Title">Select Chart Type</h3>
+                            <div id="chart3" class="chart"></div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- ECharts CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+
+    <!-- Shared Modules -->
+    <script type="module" src="js/shared/colorScheme.js"></script>
+    <script type="module" src="js/shared/dataFetcher.js"></script>
+    <script type="module" src="js/shared/chartUtils.js"></script>
+    <script type="module" src="js/shared/navigation.js"></script>
+    <script type="module" src="js/utils/urlParams.js"></script>
+
+    <!-- Page Module -->
+    <script type="module" src="js/pages/selector.js"></script>
+</body>
+</html>

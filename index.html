@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Buoy Dashboard - Homepage</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/charts.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Navigation Header -->
+        <header class="header">
+            <div class="header-content">
+                <button id="menuToggle" class="menu-toggle" aria-label="Toggle navigation menu">☰</button>
+                <h1>Buoy Dashboard</h1>
+            </div>
+        </header>
+
+        <!-- Navigation Menu -->
+        <nav id="navigationMenu" class="nav-menu nav-menu-closed">
+            <ul>
+                <li><a href="index.html" data-page="home">Homepage</a></li>
+                <li><a href="selector.html" data-page="selector">Selector Display</a></li>
+                <li><a href="power.html" data-page="power">Power Usage</a></li>
+                <li><a href="nextwave.html" data-page="nextwave">Next Wave</a></li>
+            </ul>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Date Range Picker -->
+            <div class="date-range-section">
+                <label>Date Range:</label>
+                <div id="dateRangePicker" class="date-range-picker">
+                    <input type="date" id="startDate" class="date-input">
+                    <span class="date-separator">–</span>
+                    <input type="date" id="endDate" class="date-input">
+                    <button id="applyDateRange" class="btn-apply">Apply</button>
+                    <button id="resetDateRange" class="btn-reset">All Available</button>
+                </div>
+            </div>
+
+            <!-- Main Layout: Left (60%) | Right (40%) -->
+            <div class="homepage-layout">
+                <!-- Left Column: Charts -->
+                <div class="homepage-left">
+                    <!-- Large Graph 1: Avg Power -->
+                    <div class="chart-container large-chart">
+                        <h3>Avg Power</h3>
+                        <div id="chartAvgPower" class="chart"></div>
+                    </div>
+
+                    <!-- Large Graph 2: Efficiency -->
+                    <div class="chart-container large-chart">
+                        <h3>Efficiency</h3>
+                        <div id="chartEfficiency" class="chart"></div>
+                    </div>
+
+                    <!-- Small Graph 3: Hs Scatter -->
+                    <div class="chart-container small-chart">
+                        <h3>Wave Height (Hs)</h3>
+                        <div id="chartHs" class="chart"></div>
+                    </div>
+
+                    <!-- Small Graph 4: Tp Scatter -->
+                    <div class="chart-container small-chart">
+                        <h3>Wave Period (Tp)</h3>
+                        <div id="chartTp" class="chart"></div>
+                    </div>
+
+                    <!-- Sea State Scatter: Hs vs Tp -->
+                    <div class="chart-container sea-state-chart">
+                        <h3>Sea State (Hs vs Tp)</h3>
+                        <div id="chartSeaState" class="chart"></div>
+                    </div>
+                </div>
+
+                <!-- Right Column: Controller Status -->
+                <div class="homepage-right">
+                    <div class="controller-list-container">
+                        <h3>Active Controllers</h3>
+                        <ul id="controllerList" class="controller-list">
+                            <!-- Populated by JavaScript -->
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- ECharts CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+
+    <!-- Shared Modules -->
+    <script type="module" src="js/shared/colorScheme.js"></script>
+    <script type="module" src="js/shared/dataFetcher.js"></script>
+    <script type="module" src="js/shared/chartUtils.js"></script>
+    <script type="module" src="js/shared/navigation.js"></script>
+    <script type="module" src="js/utils/urlParams.js"></script>
+
+    <!-- Page Module -->
+    <script type="module" src="js/pages/homepage.js"></script>
+</body>
+</html>

@@ -1,0 +1,532 @@
+/**
+ * styles.css
+ * Global styles, layout framework, and responsive design
+ */
+
+/* ============================================================================
+   Reset & Base Styles
+   ============================================================================ */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html, body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+                 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+                 sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    color: #333333;
+    background-color: #ffffff;
+}
+
+a {
+    color: inherit;
+    text-decoration: none;
+}
+
+button {
+    cursor: pointer;
+    border: none;
+    padding: 8px 16px;
+    font-size: 14px;
+    border-radius: 4px;
+    background-color: #f0f0f0;
+    color: #333333;
+    transition: background-color 0.2s ease;
+}
+
+button:hover {
+    background-color: #e0e0e0;
+}
+
+input[type="date"] {
+    padding: 8px 12px;
+    font-size: 14px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background-color: #ffffff;
+}
+
+/* ============================================================================
+   Container & Layout
+   ============================================================================ */
+
+.container {
+    width: 100%;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.header {
+    background-color: #ffffff;
+    border-bottom: 1px solid #e0e0e0;
+    padding: 16px 20px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+
+.header-content {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    max-width: 1600px;
+    margin: 0 auto;
+}
+
+.menu-toggle {
+    background: none;
+    border: none;
+    font-size: 24px;
+    padding: 0;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: #333333;
+}
+
+.header h1 {
+    font-size: 24px;
+    font-weight: 600;
+}
+
+.main-content {
+    flex: 1;
+    padding: 20px;
+    max-width: 1600px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+/* ============================================================================
+   Navigation Menu
+   ============================================================================ */
+
+.nav-menu {
+    position: absolute;
+    top: 60px;
+    left: 0;
+    background-color: #ffffff;
+    border-bottom: 1px solid #e0e0e0;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    z-index: 99;
+    min-width: 200px;
+    transition: opacity 0.2s ease, visibility 0.2s ease;
+}
+
+.nav-menu-closed {
+    opacity: 0;
+    visibility: hidden;
+}
+
+.nav-menu-open {
+    opacity: 1;
+    visibility: visible;
+}
+
+.nav-menu ul {
+    list-style: none;
+}
+
+.nav-menu li {
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.nav-menu a {
+    display: block;
+    padding: 12px 20px;
+    transition: background-color 0.2s ease;
+}
+
+.nav-menu a:hover {
+    background-color: #fafafa;
+}
+
+/* ============================================================================
+   Date Range Picker
+   ============================================================================ */
+
+.date-range-section {
+    margin-bottom: 24px;
+}
+
+.date-range-section > label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.date-range-picker {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.date-input {
+    flex: 0 1 auto;
+}
+
+.date-separator {
+    flex-shrink: 0;
+}
+
+.btn-apply,
+.btn-reset {
+    padding: 8px 16px;
+    font-size: 14px;
+    border-radius: 4px;
+}
+
+.btn-apply {
+    background-color: #1b9e77;
+    color: #ffffff;
+}
+
+.btn-apply:hover {
+    background-color: #167a5f;
+}
+
+.btn-reset {
+    background-color: #f0f0f0;
+    color: #333333;
+}
+
+.btn-reset:hover {
+    background-color: #e0e0e0;
+}
+
+/* ============================================================================
+   Chart Containers
+   ============================================================================ */
+
+.chart-container {
+    background-color: #fafafa;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    padding: 12px;
+    margin-bottom: 16px;
+}
+
+.chart-container h3 {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #333333;
+}
+
+.chart {
+    width: 100%;
+    height: 300px;
+    min-height: 200px;
+}
+
+.large-chart .chart {
+    height: 400px;
+}
+
+.small-chart .chart {
+    height: 200px;
+}
+
+.sea-state-chart .chart {
+    height: 350px;
+}
+
+.full-width-chart .chart {
+    height: 500px;
+}
+
+.stacked-chart .chart {
+    height: 33.333%;
+    min-height: 250px;
+}
+
+/* ============================================================================
+   Homepage Layout: 60% | 40%
+   ============================================================================ */
+
+.homepage-layout {
+    display: grid;
+    grid-template-columns: 60% 1fr;
+    gap: 20px;
+}
+
+.homepage-left {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.homepage-right {
+    display: flex;
+    flex-direction: column;
+}
+
+.controller-list-container {
+    background-color: #fafafa;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    padding: 16px;
+}
+
+.controller-list-container h3 {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 12px;
+}
+
+.controller-list {
+    list-style: none;
+}
+
+.controller-list li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 0;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.controller-list li:last-child {
+    border-bottom: none;
+}
+
+.controller-indicator {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.controller-indicator.active {
+    background-color: #1b9e77;
+}
+
+.controller-indicator.inactive {
+    background-color: #cccccc;
+    border: 2px solid #999999;
+}
+
+/* ============================================================================
+   Selector Display Layout: 30% | 70%
+   ============================================================================ */
+
+.selector-layout {
+    display: grid;
+    grid-template-columns: 30% 1fr;
+    gap: 20px;
+}
+
+.selector-left {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.selector-right {
+    display: flex;
+    flex-direction: column;
+}
+
+.filter-section {
+    background-color: #fafafa;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    padding: 16px;
+}
+
+.filter-section h3 {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 12px;
+}
+
+.checkbox-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.checkbox-group label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.checkbox-group input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+}
+
+.chart-type-selectors {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.chart-type-selector {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.chart-type-selector label {
+    font-size: 13px;
+    font-weight: 500;
+    color: #666666;
+}
+
+.chart-type-selector select {
+    padding: 6px 8px;
+    font-size: 14px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background-color: #ffffff;
+}
+
+.sea-state-legend {
+    font-size: 12px;
+    padding-top: 8px;
+    border-top: 1px solid #e0e0e0;
+    margin-top: 8px;
+}
+
+.sea-state-legend p {
+    margin: 4px 0;
+}
+
+.legend-filled {
+    color: #d95f02;
+    font-weight: 600;
+}
+
+.legend-hollow {
+    color: #cccccc;
+}
+
+.charts-container {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+/* ============================================================================
+   Responsive Design
+   ============================================================================ */
+
+/* Tablet: 768px – 1199px */
+@media (max-width: 1199px) {
+    .homepage-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .selector-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .homepage-left,
+    .selector-left,
+    .selector-right {
+        gap: 16px;
+    }
+
+    .large-chart .chart {
+        height: 300px;
+    }
+
+    .small-chart .chart {
+        height: 150px;
+    }
+}
+
+/* Mobile: < 768px */
+@media (max-width: 767px) {
+    .header {
+        padding: 12px 16px;
+    }
+
+    .header h1 {
+        font-size: 18px;
+    }
+
+    .main-content {
+        padding: 12px;
+    }
+
+    .header-content {
+        gap: 8px;
+    }
+
+    .date-range-picker {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .date-input,
+    .btn-apply,
+    .btn-reset {
+        width: 100%;
+    }
+
+    .chart-container {
+        padding: 8px;
+    }
+
+    .large-chart .chart,
+    .small-chart .chart,
+    .sea-state-chart .chart,
+    .full-width-chart .chart {
+        height: 250px;
+    }
+
+    .stacked-chart .chart {
+        height: 250px;
+    }
+
+    .controller-list-container {
+        padding: 12px;
+    }
+
+    .filter-section {
+        padding: 12px;
+    }
+
+    .nav-menu {
+        position: fixed;
+        top: 56px;
+        left: 0;
+        right: 0;
+        width: 100%;
+        max-width: 100%;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        border-radius: 0;
+    }
+}
+
+/* ============================================================================
+   Utility Classes
+   ============================================================================ */
+
+.text-center {
+    text-align: center;
+}
+
+.text-muted {
+    color: #999999;
+}
+
+.hidden {
+    display: none;
+}

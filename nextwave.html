@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Buoy Dashboard - Next Wave</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/charts.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Navigation Header -->
+        <header class="header">
+            <div class="header-content">
+                <button id="menuToggle" class="menu-toggle" aria-label="Toggle navigation menu">☰</button>
+                <h1>Buoy Dashboard</h1>
+            </div>
+        </header>
+
+        <!-- Navigation Menu -->
+        <nav id="navigationMenu" class="nav-menu nav-menu-closed">
+            <ul>
+                <li><a href="index.html" data-page="home">Homepage</a></li>
+                <li><a href="selector.html" data-page="selector">Selector Display</a></li>
+                <li><a href="power.html" data-page="power">Power Usage</a></li>
+                <li><a href="nextwave.html" data-page="nextwave">Next Wave</a></li>
+            </ul>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Date Range Picker -->
+            <div class="date-range-section">
+                <label>Date Range:</label>
+                <div id="dateRangePicker" class="date-range-picker">
+                    <input type="date" id="startDate" class="date-input">
+                    <span class="date-separator">–</span>
+                    <input type="date" id="endDate" class="date-input">
+                    <button id="applyDateRange" class="btn-apply">Apply</button>
+                    <button id="resetDateRange" class="btn-reset">Past 2 Days</button>
+                </div>
+            </div>
+
+            <!-- Chart Selector -->
+            <div class="filter-section">
+                <h3>Chart Selector</h3>
+                <div id="chartCheckboxes" class="checkbox-group">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </div>
+
+            <!-- Charts Container -->
+            <div id="chartsContainer" class="charts-container">
+                <!-- Charts populated by JavaScript -->
+            </div>
+        </main>
+    </div>
+
+    <!-- ECharts CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+
+    <!-- Shared Modules -->
+    <script type="module" src="js/shared/colorScheme.js"></script>
+    <script type="module" src="js/shared/dataFetcher.js"></script>
+    <script type="module" src="js/shared/chartUtils.js"></script>
+    <script type="module" src="js/shared/navigation.js"></script>
+    <script type="module" src="js/utils/urlParams.js"></script>
+
+    <!-- Page Module -->
+    <script type="module" src="js/pages/nextwave.js"></script>
+</body>
+</html>

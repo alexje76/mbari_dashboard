@@ -1,68 +1,19 @@
 /**
  * Navigation menu module for Buoy Dashboard.
- * Renders hamburger menu and handles navigation between pages.
+ * Handles hamburger menu dropdown and navigation between pages.
  */
 
 /**
  * Initialize the navigation menu on the current page.
- * Renders hamburger button and dropdown menu with links to all pages.
+ * Attaches click handlers to existing hamburger button and creates dropdown menu.
  * Menu state (open/closed) is local to each page.
  */
 function initNavigation() {
-  // Create menu container if it doesn't exist
-  let navContainer = document.getElementById('nav-container');
-  if (!navContainer) {
-    navContainer = document.createElement('nav');
-    navContainer.id = 'nav-container';
-    navContainer.style.cssText = `
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      background-color: #ffffff;
-      border-bottom: 1px solid #f0f0f0;
-      z-index: 1000;
-      padding: 12px 20px;
-      display: flex;
-      align-items: center;
-      gap: 16px;
-    `;
-
-    // Hamburger button
-    const hamburger = document.createElement('button');
-    hamburger.id = 'hamburger-btn';
-    hamburger.innerHTML = '☰';
-    hamburger.style.cssText = `
-      background: none;
-      border: none;
-      font-size: 24px;
-      cursor: pointer;
-      color: #333333;
-      padding: 0;
-      width: 40px;
-      height: 40px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    `;
-
-    // Title
-    const title = document.createElement('h1');
-    title.textContent = 'Buoy Dashboard';
-    title.style.cssText = `
-      margin: 0;
-      font-size: 20px;
-      font-weight: 600;
-      color: #333333;
-      flex: 1;
-    `;
-
-    navContainer.appendChild(hamburger);
-    navContainer.appendChild(title);
-    document.body.insertBefore(navContainer, document.body.firstChild);
-
-    // Add top margin to body to account for nav bar
-    document.body.style.paddingTop = '60px';
+  // Find existing hamburger button (already in HTML)
+  const hamburger = document.getElementById('hamburger-btn');
+  if (!hamburger) {
+    console.warn('Hamburger button not found in HTML. Expected id="hamburger-btn"');
+    return;
   }
 
   // Create menu dropdown if it doesn't exist
@@ -118,7 +69,6 @@ function initNavigation() {
   }
 
   // Toggle menu on hamburger click
-  const hamburger = document.getElementById('hamburger-btn');
   hamburger.addEventListener('click', (e) => {
     e.stopPropagation();
     const isOpen = menuDropdown.style.display === 'flex';

@@ -3,7 +3,7 @@
  * Handles manifest loading, CSV fetching/caching, and data transformation.
  */
 
-const BASE_PATH = '/buoy-dashboard'; // GitHub Pages repo base path
+const BASE_PATH = '/mbari_dashboard'; // GitHub Pages repo base path
 
 // In-memory cache for day files
 const dayFileCache = new Map();
@@ -276,27 +276,28 @@ function downsampleToHourly(data) {
     timestamp_iso: hour.timestamp_iso,
     timestamp_ns: hour.timestamp_ns,
     controller: hour.controller,
-    hs: hour.hs.length > 0 ? (hour.hs.reduce((a, b) => a + b) / hour.hs.length).toFixed(2) : '',
-    tp: hour.tp.length > 0 ? (hour.tp.reduce((a, b) => a + b) / hour.tp.length).toFixed(2) : '',
-    avg_power: hour.avg_power.length > 0 ? (hour.avg_power.reduce((a, b) => a + b) / hour.avg_power.length).toFixed(2) : '',
-    power_in: hour.power_in.length > 0 ? (hour.power_in.reduce((a, b) => a + b) / hour.power_in.length).toFixed(2) : '',
-    power_out: hour.power_out.length > 0 ? (hour.power_out.reduce((a, b) => a + b) / hour.power_out.length).toFixed(2) : '',
-    battery_pct: hour.battery_pct.length > 0 ? (hour.battery_pct.reduce((a, b) => a + b) / hour.battery_pct.length).toFixed(2) : '',
-    sea_state_energy: hour.sea_state_energy.length > 0 ? (hour.sea_state_energy.reduce((a, b) => a + b) / hour.sea_state_energy.length).toFixed(2) : '',
-    efficiency: hour.efficiency.length > 0 ? (hour.efficiency.reduce((a, b) => a + b) / hour.efficiency.length).toFixed(2) : '',
-    peaks: hour.peaks_total,
+    hs: hour.hs.length > 0 ? (hour.hs.reduce((a, b) => a + b, 0) / hour.hs.length).toFixed(2) : null,
+    tp: hour.tp.length > 0 ? (hour.tp.reduce((a, b) => a + b, 0) / hour.tp.length).toFixed(2) : null,
+    avg_power: hour.avg_power.length > 0 ? (hour.avg_power.reduce((a, b) => a + b, 0) / hour.avg_power.length).toFixed(2) : null,
+    power_in: hour.power_in.length > 0 ? (hour.power_in.reduce((a, b) => a + b, 0) / hour.power_in.length).toFixed(2) : null,
+    power_out: hour.power_out.length > 0 ? (hour.power_out.reduce((a, b) => a + b, 0) / hour.power_out.length).toFixed(2) : null,
+    battery_pct: hour.battery_pct.length > 0 ? (hour.battery_pct.reduce((a, b) => a + b, 0) / hour.battery_pct.length).toFixed(2) : null,
+    sea_state_energy: hour.sea_state_energy.length > 0 ? (hour.sea_state_energy.reduce((a, b) => a + b, 0) / hour.sea_state_energy.length).toFixed(2) : null,
+    efficiency: hour.efficiency.length > 0 ? (hour.efficiency.reduce((a, b) => a + b, 0) / hour.efficiency.length).toFixed(2) : null,
+    peaks_total: hour.peaks_total,
     nextwave: hour.nextwave,
-    nextwave_error: hour.nextwave_error.length > 0 ? (hour.nextwave_error.reduce((a, b) => a + b) / hour.nextwave_error.length).toFixed(2) : '',
-    nextwave_error_2: hour.nextwave_error_2.length > 0 ? (hour.nextwave_error_2.reduce((a, b) => a + b) / hour.nextwave_error_2.length).toFixed(2) : '',
+    nextwave_error: hour.nextwave_error.length > 0 ? (hour.nextwave_error.reduce((a, b) => a + b, 0) / hour.nextwave_error.length).toFixed(2) : null,
+    nextwave_error_2: hour.nextwave_error_2.length > 0 ? (hour.nextwave_error_2.reduce((a, b) => a + b, 0) / hour.nextwave_error_2.length).toFixed(2) : null,
   }));
 
-  return result.sort((a, b) => new Date(a.timestamp_iso) - new Date(b.timestamp_iso));
+  return result;
 }
 
 export {
   fetchManifest,
   fetchDayFile,
   parseCSV,
+  parseCSVLine,
   filterByDateRange,
   getUniqueControllers,
   getSeaStateScatter,

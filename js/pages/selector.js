@@ -1,339 +1,384 @@
 /**
- * selector.js
- * Selector Display (selector.html) initialization, state management, and chart rendering
+ * Selector Display page (Page 2) initialization and state management.
+ * Multi-chart, multi-filter view for detailed inspection.
  */
 
 import { initNavigation } from '../shared/navigation.js';
-import { fetchManifest, fetchDayFile, parseCSV, filterByDateRange, getUniqueControllers, getSeaStateScatter } from '../shared/dataFetcher.js';
-import { initChart, syncChartZoom } from '../shared/chartUtils.js';
-import { CONTROLLER_COLOR_PALETTE } from '../shared/colorScheme.js';
-import { getURLParams, setURLParams, formatDateForURL, parseDateFromURL, getDateRangeWithDefaults } from '../utils/urlParams.js';
+import {
+  fetchManifest,
+  fetchDataForDateRange,
+  getUniqueControllers,
+  getSeaStateScatter,
+  parseCSV,
+} from '../shared/dataFetcher.js';
+import { initChart, resizeAllCharts, getColorForController } from '../shared/chartUtils.js';
+import { getURLParams, setURLParams, getDefaultDateRange } from '../utils/urlParams.js';
+import { getColor } from '../shared/colorScheme.js';
 
-let state = {
-    allData: [],
-    filteredData: [],
-    selectedControllers: new Set(),
-    selectedSeaStates: new Set(),
-    chartTypes: [],
-    selectedCharts: ['avg_power', 'efficiency', ''],
-    startDate: null,
-    endDate: null
+let currentData = [];
+let currentControllers = [];
+let currentSeaStates = [];
+let selectedControllers = new Set();
+let selectedSeaStates = new Set();
+let chartTypes = [];
+let charts = {};
+
+const chartTypesConfig = {
+  avg_power: { label: 'Avg Power', unit: 'W' },
+  efficiency: { label: 'Efficiency', unit: '%' },
+  power_in: { label: 'Power In', unit: 'W' },
+  power_out: { label: 'Power Out', unit: 'W' },
+  battery_pct: { label: 'Battery %', unit: '%' },
+  sea_state_energy: { label: 'Sea State Energy', unit: 'J/m²' },
+  hs: { label: 'Wave Height (Hs)', unit: 'm' },
+  tp: { label: 'Wave Period (Tp)', unit: 's' },
+  peaks: { label: 'Peaks', unit: 'count' },
 };
 
 /**
- * Initialize selector display page
+ * Initialize the selector display page.
  */
-async function initSelectorPage() {
-    // 1. Initialize navigation
-    initNavigation();
+async function init() {
+  initNavigation();
 
-    // 2. Load manifest
-    let manifest;
-    try {
-        manifest = await fetchManifest();
-    } catch (error) {
-        console.error('Failed to load manifest:', error);
-        document.body.innerHTML = '<p>Error loading data manifest. Please try again later.</p>';
-        return;
-    }
+  try {
+    const manifest = await fetchManifest();
+    const urlParams = getURLParams();
+    const defaultRange = getDefaultDateRange(manifest);
 
-    // 3. Load chart types config
-    let chartTypesConfig;
-    try {
-        const response = await fetch('/config/chartTypes.json');
-        chartTypesConfig = await response.json();
-        state.chartTypes = chartTypesConfig.chartTypes;
-    } catch (error) {
-        console.error('Failed to load chart types config:', error);
-    }
+    const startDate = urlParams.start || defaultRange.start;
+    const endDate = urlParams.end || defaultRange.end;
 
-    // 4. Set date range
-    const { minDate, maxDate } = manifest.availableDateRange;
-    const dateRange = getDateRangeWithDefaults(minDate, maxDate);
-    state.startDate = dateRange.start;
-    state.endDate = dateRange.end;
-    updateDateInputs(state.startDate, state.endDate);
+    // Fetch data
+    await fetchAndRenderData(startDate, endDate, urlParams);
 
-    // 5. Fetch and parse data
-    try {
-        state.allData = await fetchDataForDateRange(manifest, state.startDate, state.endDate);
-    } catch (error) {
-        console.error('Failed to fetch data:', error);
-        return;
-    }
+    // Setup event listeners
+    setupDateRangePicker(manifest, startDate, endDate);
+    setupFilterListeners();
+    setupChartTypeSelectors();
 
-    // 6. Initialize state: controllers and sea states (all selected by default)
-    const controllers = getUniqueControllers(state.allData);
-    state.selectedControllers = new Set(controllers);
-
-    const seaStates = getSeaStateScatter(state.allData);
-    state.selectedSeaStates = new Set(seaStates.map(s => `${s.tp},${s.hs}`));
-
-    // 7. Populate filter UI
-    populateControllerCheckboxes(controllers);
-    populateChartTypeSelectors(state.chartTypes);
-    renderSeaStateScatter(seaStates);
-
-    // 8. Apply initial filter and render charts
-    applyFilters();
-
-    // 9. Set up event listeners
-    setupEventListeners(manifest);
+    window.addEventListener('resize', () => resizeAllCharts());
+  } catch (error) {
+    console.error('Selector page initialization error:', error);
+    showError('Failed to load data. Please refresh the page.');
+  }
 }
 
 /**
- * Fetch all CSV data for date range
+ * Fetch data and initialize all UI components.
  */
-async function fetchDataForDateRange(manifest, startDate, endDate) {
-    const allRows = [];
-    const current = new Date(startDate);
+async function fetchAndRenderData(startDate, endDate, urlParams = {}) {
+  try {
+    showLoadingState(true);
 
-    while (current <= endDate) {
-        const dateStr = formatDateForURL(current);
-        if (manifest.dayFiles.includes(dateStr)) {
-            try {
-                const csvText = await fetchDayFile(dateStr);
-                const rows = parseCSV(csvText);
-                allRows.push(...rows);
-            } catch (error) {
-                console.warn(`Failed to fetch day file ${dateStr}:`, error);
-            }
-        }
-        current.setDate(current.getDate() + 1);
-    }
+    currentData = await fetchDataForDateRange(startDate, endDate);
+    currentControllers = getUniqueControllers(currentData);
+    currentSeaStates = getSeaStateScatter(currentData);
 
-    return allRows;
-}
+    // Restore filter state from URL or default
+    selectedControllers = new Set(
+      urlParams.controllers && urlParams.controllers.length > 0
+        ? urlParams.controllers
+        : currentControllers
+    );
+    selectedSeaStates = new Set(
+      urlParams.seaStates && urlParams.seaStates.length > 0
+        ? urlParams.seaStates.map((ss) => `${ss.hs},${ss.tp}`)
+        : currentSeaStates.map((ss) => `${ss.hs},${ss.tp}`)
+    );
 
-/**
- * Populate controller checkboxes
- */
-function populateControllerCheckboxes(controllers) {
-    const container = document.getElementById('controllerCheckboxes');
-    if (!container) return;
-
-    container.innerHTML = '';
-    controllers.forEach((controller, idx) => {
-        const color = CONTROLLER_COLOR_PALETTE[idx % CONTROLLER_COLOR_PALETTE.length];
-        const label = document.createElement('label');
-        label.innerHTML = `
-            <input type="checkbox" value="${controller}" checked>
-            <span style="color: ${color};">●</span> ${controller}
-        `;
-        label.querySelector('input').addEventListener('change', (e) => {
-            if (e.target.checked) {
-                state.selectedControllers.add(controller);
-            } else {
-                state.selectedControllers.delete(controller);
-            }
-            applyFilters();
-        });
-        container.appendChild(label);
-    });
-}
-
-/**
- * Populate chart type dropdowns (3 selectors)
- */
-function populateChartTypeSelectors(chartTypes) {
-    for (let i = 1; i <= 3; i++) {
-        const container = document.getElementById(`chartTypeSelector${i}`);
-        if (!container) continue;
-
-        const select = document.createElement('select');
-        select.id = `chartTypeSelect${i}`;
-        
-        // Add "Select chart type" option
-        const emptyOpt = document.createElement('option');
-        emptyOpt.value = '';
-        emptyOpt.textContent = 'Select chart type';
-        select.appendChild(emptyOpt);
-
-        // Add all chart type options
-        chartTypes.forEach(ct => {
-            const opt = document.createElement('option');
-            opt.value = ct.name;
-            opt.textContent = ct.label;
-            select.appendChild(opt);
-        });
-
-        select.value = state.selectedCharts[i - 1] || '';
-        select.addEventListener('change', (e) => {
-            state.selectedCharts[i - 1] = e.target.value;
-            applyFilters();
-        });
-
-        container.innerHTML = '';
-        container.appendChild(select);
-    }
-}
-
-/**
- * Render sea state scatter selector
- */
-function renderSeaStateScatter(seaStates) {
-    const container = document.getElementById('seaStateScatter');
-    if (!container) return;
-
-    const scatterData = seaStates.map(s => [s.tp, s.hs]);
-    const seaStateChart = initChart('seaStateScatter', {
-        tooltip: { trigger: 'item' },
-        xAxis: { type: 'value', name: 'Tp' },
-        yAxis: { type: 'value', name: 'Hs' },
-        grid: { left: '12%', right: '5%', top: '10%', bottom: '12%' },
-        series: [{
-            name: 'Sea States',
-            data: scatterData,
-            type: 'scatter',
-            symbolSize: 8,
-            itemStyle: { color: '#d95f02' }
-        }]
-    });
-
-    // Click handler for sea state selection
-    seaStateChart.on('click', (params) => {
-        if (params.value) {
-            const key = `${params.value[0]},${params.value[1]}`;
-            if (state.selectedSeaStates.has(key)) {
-                state.selectedSeaStates.delete(key);
-            } else {
-                state.selectedSeaStates.add(key);
-            }
-            applyFilters();
-        }
-    });
-}
-
-/**
- * Apply controller and sea state filters to data
- */
-function applyFilters() {
-    let filtered = state.allData.filter(row => {
-        // Controller filter
-        if (!state.selectedControllers.has(row.controller)) {
-            return false;
-        }
-        // Sea state filter
-        const seaStateKey = `${row.tp},${row.hs}`;
-        if (!state.selectedSeaStates.has(seaStateKey)) {
-            return false;
-        }
-        return true;
-    });
-
-    state.filteredData = filtered;
-
-    // Re-render charts
+    // Initialize UI
+    renderControllerCheckboxes();
+    renderSeaStateScatter();
     renderCharts();
+
+    showLoadingState(false);
+  } catch (error) {
+    console.error('Error fetching data:', error);
+    showLoadingState(false);
+    showError('Failed to fetch data for the selected range.');
+  }
 }
 
 /**
- * Render the 3 selector charts
+ * Render controller selector checkboxes.
+ */
+function renderControllerCheckboxes() {
+  const container = document.getElementById('controller-selector');
+  if (!container) return;
+
+  container.innerHTML = '';
+
+  currentControllers.forEach((controller) => {
+    const label = document.createElement('label');
+    label.style.cssText = `
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 0;
+      cursor: pointer;
+      font-size: 14px;
+    `;
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.value = controller;
+    checkbox.checked = selectedControllers.has(controller);
+    checkbox.addEventListener('change', () => {
+      if (checkbox.checked) {
+        selectedControllers.add(controller);
+      } else {
+        selectedControllers.delete(controller);
+      }
+      updateCharts();
+      updateURLParams();
+    });
+
+    const indicator = document.createElement('span');
+    indicator.textContent = '●';
+    indicator.style.color = getColor(
+      currentControllers.indexOf(controller)
+    );
+
+    label.appendChild(checkbox);
+    label.appendChild(indicator);
+    label.appendChild(document.createTextNode(controller));
+    container.appendChild(label);
+  });
+}
+
+/**
+ * Render sea state scatter selector.
+ */
+function renderSeaStateScatter() {
+  const container = document.getElementById('sea-state-selector-chart');
+  if (!container) return;
+
+  const controllerMap = Object.fromEntries(
+    currentControllers.map((c, i) => [c, i])
+  );
+
+  // Create scatter plot showing all sea states
+  const scatterData = currentSeaStates.map((ss) => ({
+    value: [parseFloat(ss.tp), parseFloat(ss.hs)],
+    key: `${ss.tp},${ss.hs}`,
+    controllers: Array.from(ss.controllers),
+  }));
+
+  const option = {
+    title: { text: 'Sea State Selection (Tp vs Hs)' },
+    tooltip: { trigger: 'item' },
+    xAxis: { type: 'value', name: 'Tp (s)' },
+    yAxis: { type: 'value', name: 'Hs (m)' },
+    series: [
+      {
+        name: 'Sea States',
+        data: scatterData.map((d) => ({
+          ...d,
+          itemStyle: {
+            color: selectedSeaStates.has(d.key) ? '#333333' : '#cccccc',
+            opacity: selectedSeaStates.has(d.key) ? 1 : 0.5,
+          },
+        })),
+        type: 'scatter',
+        symbolSize: 8,
+        itemStyle: { borderColor: '#333333', borderWidth: 1 },
+      },
+    ],
+  };
+
+  const chart = initChart('sea-state-selector-chart', option);
+
+  // Add click handler
+  chart.on('click', (params) => {
+    if (params.data && params.data.key) {
+      if (selectedSeaStates.has(params.data.key)) {
+        selectedSeaStates.delete(params.data.key);
+      } else {
+        selectedSeaStates.add(params.data.key);
+      }
+      updateCharts();
+      updateURLParams();
+      renderSeaStateScatter(); // Re-render to update visual state
+    }
+  });
+}
+
+/**
+ * Setup chart type selectors (3 dropdowns).
+ */
+function setupChartTypeSelectors() {
+  const typeOptions = Object.keys(chartTypesConfig);
+
+  for (let i = 1; i <= 3; i++) {
+    const selector = document.getElementById(`chart-type-${i}`);
+    if (!selector) continue;
+
+    selector.innerHTML = '<option value="">Select chart type</option>';
+    typeOptions.forEach((type) => {
+      const option = document.createElement('option');
+      option.value = type;
+      option.textContent = chartTypesConfig[type].label;
+      selector.appendChild(option);
+    });
+
+    // Set default values
+    if (i === 1) selector.value = 'avg_power';
+    if (i === 2) selector.value = 'efficiency';
+
+    selector.addEventListener('change', () => {
+      chartTypes[i - 1] = selector.value;
+      renderCharts();
+      updateURLParams();
+    });
+  }
+}
+
+/**
+ * Render the three main charts.
  */
 function renderCharts() {
-    if (state.filteredData.length === 0) return;
+  chartTypes = [
+    document.getElementById('chart-type-1')?.value || 'avg_power',
+    document.getElementById('chart-type-2')?.value || 'efficiency',
+    document.getElementById('chart-type-3')?.value || '',
+  ].filter((t) => t);
 
-    const xAxisData = state.filteredData.map(row => new Date(row.timestamp_iso).getTime());
-
-    for (let i = 1; i <= 3; i++) {
-        const chartName = state.selectedCharts[i - 1];
-        const domId = `chart${i}`;
-        const titleId = `chart${i}Title`;
-
-        if (!chartName || chartName === '') {
-            // Clear chart
-            const dom = document.getElementById(domId);
-            if (dom) dom.innerHTML = '<p style="color: #ccc; text-align: center;">No chart selected</p>';
-            continue;
-        }
-
-        // Find chart type metadata
-        const chartType = state.chartTypes.find(ct => ct.name === chartName);
-        if (!chartType) continue;
-
-        // Update title
-        const titleEl = document.getElementById(titleId);
-        if (titleEl) titleEl.textContent = chartType.label;
-
-        // Extract data for this chart
-        const seriesData = state.filteredData.map(row => row[chartName] || null);
-
-        // Create chart config
-        const config = {
-            tooltip: { trigger: 'axis' },
-            legend: { data: [chartType.label] },
-            xAxis: { type: 'time', data: xAxisData },
-            yAxis: { type: 'value' },
-            grid: { left: '10%', right: '5%', top: '15%', bottom: '10%' },
-            series: [{
-                name: chartType.label,
-                data: seriesData,
-                type: 'line',
-                smooth: false,
-                itemStyle: { color: '#1b9e77' },
-                areaStyle: { color: 'rgba(27, 158, 119, 0.2)' }
-            }],
-            dataZoom: [
-                { type: 'inside', xAxisIndex: [0] },
-                { type: 'slider', xAxisIndex: [0], show: true }
-            ]
-        };
-
-        initChart(domId, config);
-    }
+  chartTypes.forEach((chartType, index) => {
+    const chartId = `chart-${index + 1}`;
+    renderChart(chartId, chartType, index);
+  });
 }
 
 /**
- * Update date inputs
+ * Render a single chart with filtering and overlays.
  */
-function updateDateInputs(startDate, endDate) {
-    const startInput = document.getElementById('startDate');
-    const endInput = document.getElementById('endDate');
-    if (startInput) startInput.valueAsDate = startDate;
-    if (endInput) endInput.valueAsDate = endDate;
+function renderChart(chartId, chartType, chartIndex) {
+  const container = document.getElementById(chartId);
+  if (!container) return;
+
+  // Filter data based on selections
+  const filteredData = currentData.filter((row) => {
+    const hasController = selectedControllers.has(row.controller);
+    const seaStateKey = `${row.tp},${row.hs}`;
+    const hasSeaState = selectedSeaStates.has(seaStateKey);
+    return hasController && hasSeaState;
+  });
+
+  // Build series
+  const timeAxis = filteredData.map((row) => row.timestamp_iso);
+  const series = currentControllers.map((controller) => ({
+    name: controller,
+    data: filteredData.map((row) =>
+      row.controller === controller && selectedControllers.has(controller)
+        ? parseFloat(row[chartType]) || null
+        : null
+    ),
+    type: 'line',
+    smooth: true,
+    color: getColor(currentControllers.indexOf(controller)),
+  }));
+
+  const option = {
+    title: { text: chartTypesConfig[chartType]?.label || chartType },
+    tooltip: { trigger: 'axis' },
+    legend: { data: currentControllers },
+    xAxis: {
+      type: 'category',
+      data: timeAxis,
+    },
+    yAxis: {
+      type: 'value',
+      name: chartTypesConfig[chartType]?.unit || '',
+    },
+    series,
+    dataZoom: [{ type: 'slider', show: true }],
+  };
+
+  charts[chartId] = initChart(chartId, option);
 }
 
 /**
- * Set up event listeners
+ * Update all charts with current filter state.
  */
-function setupEventListeners(manifest) {
-    const applyBtn = document.getElementById('applyDateRange');
-    const resetBtn = document.getElementById('resetDateRange');
-    const startInput = document.getElementById('startDate');
-    const endInput = document.getElementById('endDate');
+function updateCharts() {
+  renderCharts();
+}
 
-    if (applyBtn) {
-        applyBtn.addEventListener('click', async () => {
-            const startDate = startInput.valueAsDate;
-            const endDate = endInput.valueAsDate;
+/**
+ * Setup date range picker.
+ */
+function setupDateRangePicker(manifest, defaultStart, defaultEnd) {
+  const startInput = document.getElementById('date-start');
+  const endInput = document.getElementById('date-end');
 
-            if (startDate && endDate) {
-                state.startDate = startDate;
-                state.endDate = endDate;
+  if (!startInput || !endInput) return;
 
-                // Re-fetch data for new date range
-                try {
-                    state.allData = await fetchDataForDateRange(manifest, startDate, endDate);
-                    applyFilters();
-                    setURLParams({
-                        start: formatDateForURL(startDate),
-                        end: formatDateForURL(endDate)
-                    });
-                } catch (error) {
-                    console.error('Failed to fetch data for new date range:', error);
-                }
-            }
-        });
+  startInput.valueAsDate = defaultStart;
+  endInput.valueAsDate = defaultEnd;
+
+  const handleDateChange = () => {
+    const start = startInput.valueAsDate;
+    const end = endInput.valueAsDate;
+
+    if (start && end && start <= end) {
+      const urlParams = getURLParams();
+      fetchAndRenderData(start, end, urlParams);
     }
+  };
 
-    if (resetBtn) {
-        resetBtn.addEventListener('click', () => {
-            const { minDate, maxDate } = manifest.availableDateRange;
-            updateDateInputs(parseDateFromURL(minDate), parseDateFromURL(maxDate));
-            applyBtn?.click();
-        });
-    }
+  startInput.addEventListener('change', handleDateChange);
+  endInput.addEventListener('change', handleDateChange);
+}
+
+/**
+ * Setup filter event listeners.
+ */
+function setupFilterListeners() {
+  // Listeners are set up in renderControllerCheckboxes and setupChartTypeSelectors
+}
+
+/**
+ * Update URL params with current state.
+ */
+function updateURLParams() {
+  const startInput = document.getElementById('date-start');
+  const endInput = document.getElementById('date-end');
+
+  setURLParams({
+    start: startInput?.valueAsDate,
+    end: endInput?.valueAsDate,
+    controllers: Array.from(selectedControllers),
+    seaStates: Array.from(selectedSeaStates).map((key) => {
+      const [tp, hs] = key.split(',');
+      return { tp: parseFloat(tp), hs: parseFloat(hs) };
+    }),
+    chartTypes: chartTypes.filter((t) => t),
+  });
+}
+
+/**
+ * Show or hide loading state.
+ */
+function showLoadingState(isLoading) {
+  const loader = document.getElementById('loading-indicator');
+  if (loader) {
+    loader.style.display = isLoading ? 'block' : 'none';
+  }
+}
+
+/**
+ * Show error message.
+ */
+function showError(message) {
+  const errorContainer = document.getElementById('error-message');
+  if (errorContainer) {
+    errorContainer.textContent = message;
+    errorContainer.style.display = 'block';
+  }
 }
 
 // Initialize on page load
-document.addEventListener('DOMContentLoaded', initSelectorPage);
+document.addEventListener('DOMContentLoaded', init);
+
+export { init };

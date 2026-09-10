@@ -1,165 +1,164 @@
 /**
- * power.js
- * Power Usage (power.html) initialization and state management
+ * Power Usage page (Page 3) initialization and state management.
+ * Battery percentage tracking over time.
  */
 
 import { initNavigation } from '../shared/navigation.js';
-import { fetchManifest, fetchDayFile, parseCSV, filterByDateRange } from '../shared/dataFetcher.js';
-import { initChart } from '../shared/chartUtils.js';
-import { getURLParams, setURLParams, formatDateForURL, parseDateFromURL, getDateRangeWithDefaults } from '../utils/urlParams.js';
+import {
+  fetchManifest,
+  fetchDataForDateRange,
+  getUniqueControllers,
+} from '../shared/dataFetcher.js';
+import { initChart, resizeAllCharts, getColorForController } from '../shared/chartUtils.js';
+import { getURLParams, setURLParams, getLastNDays } from '../utils/urlParams.js';
+import { getColor } from '../shared/colorScheme.js';
+
+let currentData = [];
+let currentControllers = [];
+let charts = {};
 
 /**
- * Initialize power usage page
+ * Initialize the power usage page.
  */
-async function initPowerPage() {
-    // 1. Initialize navigation
-    initNavigation();
+async function init() {
+  initNavigation();
 
-    // 2. Load manifest
-    let manifest;
-    try {
-        manifest = await fetchManifest();
-    } catch (error) {
-        console.error('Failed to load manifest:', error);
-        document.body.innerHTML = '<p>Error loading data manifest. Please try again later.</p>';
-        return;
-    }
+  try {
+    const manifest = await fetchManifest();
+    const urlParams = getURLParams();
 
-    // 3. Set date range (default: past 2 days)
-    const { minDate, maxDate } = manifest.availableDateRange;
-    const defaultEnd = parseDateFromURL(maxDate);
-    const defaultStart = new Date(defaultEnd);
-    defaultStart.setDate(defaultStart.getDate() - 2);
+    // Default to last 2 days if no URL params
+    const lastTwoDays = getLastNDays(2);
+    const startDate = urlParams.start || lastTwoDays.start;
+    const endDate = urlParams.end || lastTwoDays.end;
 
-    const dateRange = getDateRangeWithDefaults(
-        formatDateForURL(defaultStart),
-        formatDateForURL(defaultEnd)
-    );
+    // Fetch and render
+    await fetchAndRenderData(startDate, endDate);
 
-    updateDateInputs(dateRange.start, dateRange.end);
+    // Setup event listeners
+    setupDateRangePicker(manifest, startDate, endDate);
 
-    // 4. Fetch data
-    let allData = [];
-    try {
-        allData = await fetchDataForDateRange(manifest, dateRange.start, dateRange.end);
-    } catch (error) {
-        console.error('Failed to fetch data:', error);
-        return;
-    }
-
-    // 5. Render battery chart
-    renderBatteryChart(allData);
-
-    // 6. Set up event listeners
-    setupDateRangeListener(manifest, allData);
+    window.addEventListener('resize', () => resizeAllCharts());
+  } catch (error) {
+    console.error('Power page initialization error:', error);
+    showError('Failed to load data. Please refresh the page.');
+  }
 }
 
 /**
- * Fetch all CSV data for date range
+ * Fetch data for date range and render charts.
  */
-async function fetchDataForDateRange(manifest, startDate, endDate) {
-    const allRows = [];
-    const current = new Date(startDate);
+async function fetchAndRenderData(startDate, endDate) {
+  try {
+    showLoadingState(true);
 
-    while (current <= endDate) {
-        const dateStr = formatDateForURL(current);
-        if (manifest.dayFiles.includes(dateStr)) {
-            try {
-                const csvText = await fetchDayFile(dateStr);
-                const rows = parseCSV(csvText);
-                allRows.push(...rows);
-            } catch (error) {
-                console.warn(`Failed to fetch day file ${dateStr}:`, error);
-            }
-        }
-        current.setDate(current.getDate() + 1);
-    }
+    currentData = await fetchDataForDateRange(startDate, endDate);
+    currentControllers = getUniqueControllers(currentData);
 
-    return allRows;
-}
+    // Render charts
+    renderBatteryChart();
 
-/**
- * Render battery percentage chart
- */
-function renderBatteryChart(data) {
-    if (data.length === 0) return;
-
-    const xAxisData = data.map(row => new Date(row.timestamp_iso).getTime());
-    const batteryData = data.map(row => row.battery_pct || null);
-
-    initChart('chartBattery', {
-        tooltip: { trigger: 'axis' },
-        legend: { data: ['Battery %'] },
-        xAxis: { type: 'time', data: xAxisData },
-        yAxis: { type: 'value', min: 0, max: 100 },
-        grid: { left: '10%', right: '5%', top: '15%', bottom: '10%' },
-        series: [{
-            name: 'Battery %',
-            data: batteryData,
-            type: 'line',
-            smooth: false,
-            itemStyle: { color: '#1b9e77' },
-            areaStyle: { color: 'rgba(27, 158, 119, 0.2)' }
-        }],
-        dataZoom: [
-            { type: 'inside', xAxisIndex: [0] },
-            { type: 'slider', xAxisIndex: [0], show: true }
-        ]
+    // Update URL params
+    setURLParams({
+      start: startDate,
+      end: endDate,
     });
+
+    showLoadingState(false);
+  } catch (error) {
+    console.error('Error fetching data:', error);
+    showLoadingState(false);
+    showError('Failed to fetch data for the selected range.');
+  }
 }
 
 /**
- * Update date inputs
+ * Render battery percentage chart.
  */
-function updateDateInputs(startDate, endDate) {
-    const startInput = document.getElementById('startDate');
-    const endInput = document.getElementById('endDate');
-    if (startInput) startInput.valueAsDate = startDate;
-    if (endInput) endInput.valueAsDate = endDate;
+function renderBatteryChart() {
+  const timeAxis = currentData.map((row) => row.timestamp_iso);
+  const batteryData = currentData.map((row) => parseFloat(row.battery_pct) || null);
+
+  // Create series per controller if needed, or single series for overall battery
+  const series = currentControllers.map((controller) => ({
+    name: controller,
+    data: currentData.map((row) =>
+      row.controller === controller ? parseFloat(row.battery_pct) || null : null
+    ),
+    type: 'line',
+    smooth: true,
+    color: getColor(currentControllers.indexOf(controller)),
+    areaStyle: { opacity: 0.3 },
+  }));
+
+  const option = {
+    title: { text: 'Battery Percentage (%)' },
+    tooltip: { trigger: 'axis' },
+    legend: { data: currentControllers },
+    xAxis: {
+      type: 'category',
+      data: timeAxis,
+    },
+    yAxis: {
+      type: 'value',
+      name: 'Percentage (%)',
+      min: 0,
+      max: 100,
+    },
+    series,
+    dataZoom: [{ type: 'slider', show: true }],
+  };
+
+  charts.battery = initChart('chart-battery', option);
 }
 
 /**
- * Set up date range change listener
+ * Setup date range picker.
  */
-function setupDateRangeListener(manifest, allData) {
-    const applyBtn = document.getElementById('applyDateRange');
-    const resetBtn = document.getElementById('resetDateRange');
-    const startInput = document.getElementById('startDate');
-    const endInput = document.getElementById('endDate');
+function setupDateRangePicker(manifest, defaultStart, defaultEnd) {
+  const startInput = document.getElementById('date-start');
+  const endInput = document.getElementById('date-end');
 
-    if (applyBtn) {
-        applyBtn.addEventListener('click', async () => {
-            const startDate = startInput.valueAsDate;
-            const endDate = endInput.valueAsDate;
+  if (!startInput || !endInput) return;
 
-            if (startDate && endDate) {
-                try {
-                    const filteredData = filterByDateRange(allData, startDate.getTime(), endDate.getTime());
-                    renderBatteryChart(filteredData);
+  startInput.valueAsDate = defaultStart;
+  endInput.valueAsDate = defaultEnd;
 
-                    setURLParams({
-                        start: formatDateForURL(startDate),
-                        end: formatDateForURL(endDate)
-                    });
-                } catch (error) {
-                    console.error('Failed to apply date range:', error);
-                }
-            }
-        });
+  const handleDateChange = () => {
+    const start = startInput.valueAsDate;
+    const end = endInput.valueAsDate;
+
+    if (start && end && start <= end) {
+      fetchAndRenderData(start, end);
     }
+  };
 
-    if (resetBtn) {
-        resetBtn.addEventListener('click', () => {
-            const { maxDate } = manifest.availableDateRange;
-            const defaultEnd = parseDateFromURL(maxDate);
-            const defaultStart = new Date(defaultEnd);
-            defaultStart.setDate(defaultStart.getDate() - 2);
+  startInput.addEventListener('change', handleDateChange);
+  endInput.addEventListener('change', handleDateChange);
+}
 
-            updateDateInputs(defaultStart, defaultEnd);
-            applyBtn?.click();
-        });
-    }
+/**
+ * Show or hide loading state.
+ */
+function showLoadingState(isLoading) {
+  const loader = document.getElementById('loading-indicator');
+  if (loader) {
+    loader.style.display = isLoading ? 'block' : 'none';
+  }
+}
+
+/**
+ * Show error message.
+ */
+function showError(message) {
+  const errorContainer = document.getElementById('error-message');
+  if (errorContainer) {
+    errorContainer.textContent = message;
+    errorContainer.style.display = 'block';
+  }
 }
 
 // Initialize on page load
-document.addEventListener('DOMContentLoaded', initPowerPage);
+document.addEventListener('DOMContentLoaded', init);
+
+export { init };

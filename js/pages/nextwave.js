@@ -1,277 +1,286 @@
 /**
- * nextwave.js
- * Next Wave (nextwave.html) initialization and state management
+ * Next Wave page (Page 4) initialization and state management.
+ * Experimental next-wave prediction data tracking.
  */
 
 import { initNavigation } from '../shared/navigation.js';
-import { fetchManifest, fetchDayFile, parseCSV, filterByDateRange } from '../shared/dataFetcher.js';
-import { initChart, syncChartZoom } from '../shared/chartUtils.js';
-import { getURLParams, setURLParams, formatDateForURL, parseDateFromURL, getDateRangeWithDefaults } from '../utils/urlParams.js';
+import {
+  fetchManifest,
+  fetchDataForDateRange,
+  getUniqueControllers,
+} from '../shared/dataFetcher.js';
+import { initChart, resizeAllCharts } from '../shared/chartUtils.js';
+import { getURLParams, setURLParams, getLastNDays } from '../utils/urlParams.js';
+import { getColor } from '../shared/colorScheme.js';
 
-let state = {
-    allData: [],
-    filteredData: [],
-    selectedCharts: new Set(['nextwave', 'nextwave_error', 'nextwave_error_2']),
-    chartTypes: [],
-    startDate: null,
-    endDate: null,
-    chartInstances: {}
-};
+const NEXTWAVE_COLUMNS = [
+  { name: 'nextwave', label: 'NextWave State', unit: 'state' },
+  { name: 'nextwave_error', label: 'NextWave Error', unit: 'RMS' },
+  { name: 'nextwave_error_2', label: 'NextWave Error 2', unit: 'value' },
+];
+
+let currentData = [];
+let selectedCharts = new Set(['nextwave', 'nextwave_error', 'nextwave_error_2']);
+let charts = {};
 
 /**
- * Initialize next wave page
+ * Initialize the next wave page.
  */
-async function initNextWavePage() {
-    // 1. Initialize navigation
-    initNavigation();
+async function init() {
+  initNavigation();
 
-    // 2. Load manifest
-    let manifest;
-    try {
-        manifest = await fetchManifest();
-    } catch (error) {
-        console.error('Failed to load manifest:', error);
-        document.body.innerHTML = '<p>Error loading data manifest. Please try again later.</p>';
-        return;
+  try {
+    const manifest = await fetchManifest();
+    const urlParams = getURLParams();
+
+    // Default to last 2 days if no URL params
+    const lastTwoDays = getLastNDays(2);
+    const startDate = urlParams.start || lastTwoDays.start;
+    const endDate = urlParams.end || lastTwoDays.end;
+
+    // Restore selected charts from URL or use defaults
+    if (urlParams.chartTypes && urlParams.chartTypes.length > 0) {
+      selectedCharts = new Set(urlParams.chartTypes);
     }
 
-    // 3. Load chart types config
-    let chartTypesConfig;
-    try {
-        const response = await fetch('/config/chartTypes.json');
-        chartTypesConfig = await response.json();
-        // Filter to only prediction category
-        state.chartTypes = chartTypesConfig.chartTypes.filter(ct => ct.category === 'prediction');
-    } catch (error) {
-        console.error('Failed to load chart types config:', error);
-        state.chartTypes = [
-            { name: 'nextwave', label: 'NextWave', category: 'prediction' },
-            { name: 'nextwave_error', label: 'NextWave Error', category: 'prediction' },
-            { name: 'nextwave_error_2', label: 'NextWave Error 2', category: 'prediction' }
-        ];
-    }
+    // Fetch and render
+    await fetchAndRenderData(startDate, endDate);
 
-    // 4. Set date range (default: past 2 days)
-    const { minDate, maxDate } = manifest.availableDateRange;
-    const defaultEnd = parseDateFromURL(maxDate);
-    const defaultStart = new Date(defaultEnd);
-    defaultStart.setDate(defaultStart.getDate() - 2);
+    // Setup event listeners
+    setupChartSelector();
+    setupDateRangePicker(manifest, startDate, endDate);
 
-    const dateRange = getDateRangeWithDefaults(
-        formatDateForURL(defaultStart),
-        formatDateForURL(defaultEnd)
-    );
+    window.addEventListener('resize', () => resizeAllCharts());
+  } catch (error) {
+    console.error('Next Wave page initialization error:', error);
+    showError('Failed to load data. Please refresh the page.');
+  }
+}
 
-    state.startDate = dateRange.start;
-    state.endDate = dateRange.end;
-    updateDateInputs(state.startDate, state.endDate);
+/**
+ * Fetch data for date range and render charts.
+ */
+async function fetchAndRenderData(startDate, endDate) {
+  try {
+    showLoadingState(true);
 
-    // 5. Fetch data
-    try {
-        state.allData = await fetchDataForDateRange(manifest, state.startDate, state.endDate);
-    } catch (error) {
-        console.error('Failed to fetch data:', error);
-        return;
-    }
+    currentData = await fetchDataForDateRange(startDate, endDate);
 
-    // 6. Populate chart checkboxes
-    populateChartCheckboxes();
-
-    // 7. Render charts
+    // Render charts for selected columns
     renderCharts();
 
-    // 8. Set up event listeners
-    setupDateRangeListener(manifest);
-}
-
-/**
- * Fetch all CSV data for date range
- */
-async function fetchDataForDateRange(manifest, startDate, endDate) {
-    const allRows = [];
-    const current = new Date(startDate);
-
-    while (current <= endDate) {
-        const dateStr = formatDateForURL(current);
-        if (manifest.dayFiles.includes(dateStr)) {
-            try {
-                const csvText = await fetchDayFile(dateStr);
-                const rows = parseCSV(csvText);
-                allRows.push(...rows);
-            } catch (error) {
-                console.warn(`Failed to fetch day file ${dateStr}:`, error);
-            }
-        }
-        current.setDate(current.getDate() + 1);
-    }
-
-    return allRows;
-}
-
-/**
- * Populate chart type checkboxes
- */
-function populateChartCheckboxes() {
-    const container = document.getElementById('chartCheckboxes');
-    if (!container) return;
-
-    container.innerHTML = '';
-    state.chartTypes.forEach(chartType => {
-        const label = document.createElement('label');
-        const isChecked = state.selectedCharts.has(chartType.name);
-        label.innerHTML = `
-            <input type="checkbox" value="${chartType.name}" ${isChecked ? 'checked' : ''}>
-            ${chartType.label}
-        `;
-
-        label.querySelector('input').addEventListener('change', (e) => {
-            if (e.target.checked) {
-                state.selectedCharts.add(chartType.name);
-            } else {
-                state.selectedCharts.delete(chartType.name);
-            }
-            renderCharts();
-        });
-
-        container.appendChild(label);
+    // Update URL params
+    setURLParams({
+      start: startDate,
+      end: endDate,
+      chartTypes: Array.from(selectedCharts),
     });
+
+    showLoadingState(false);
+  } catch (error) {
+    console.error('Error fetching data:', error);
+    showLoadingState(false);
+    showError('Failed to fetch data for the selected range.');
+  }
 }
 
 /**
- * Render selected charts
+ * Setup chart selector checkboxes.
+ */
+function setupChartSelector() {
+  const container = document.getElementById('chart-selector');
+  if (!container) return;
+
+  container.innerHTML = '';
+
+  NEXTWAVE_COLUMNS.forEach((col) => {
+    const label = document.createElement('label');
+    label.style.cssText = `
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 0;
+      cursor: pointer;
+      font-size: 14px;
+    `;
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.value = col.name;
+    checkbox.checked = selectedCharts.has(col.name);
+    checkbox.addEventListener('change', () => {
+      if (checkbox.checked) {
+        selectedCharts.add(col.name);
+      } else {
+        selectedCharts.delete(col.name);
+      }
+      renderCharts();
+      updateURLParams();
+    });
+
+    const labelText = document.createElement('span');
+    labelText.textContent = col.label;
+
+    label.appendChild(checkbox);
+    label.appendChild(labelText);
+    container.appendChild(label);
+  });
+}
+
+/**
+ * Render all selected charts stacked vertically.
  */
 function renderCharts() {
-    const container = document.getElementById('chartsContainer');
-    if (!container) return;
+  const selectedArray = Array.from(selectedCharts);
 
-    if (state.allData.length === 0) {
-        container.innerHTML = '<p style="color: #ccc;">No data available</p>';
-        return;
+  selectedArray.forEach((chartName, index) => {
+    const chartId = `chart-${index}`;
+    const container = document.getElementById(`charts-container`);
+
+    // Create or get container for this chart
+    let chartDiv = document.getElementById(chartId);
+    if (!chartDiv) {
+      chartDiv = document.createElement('div');
+      chartDiv.id = chartId;
+      chartDiv.style.cssText = `
+        width: 100%;
+        height: ${100 / selectedArray.length}%;
+        min-height: 300px;
+        margin-bottom: 16px;
+      `;
+      container?.appendChild(chartDiv);
     }
 
-    // Clear previous charts
-    container.innerHTML = '';
-    state.chartInstances = {};
+    renderChart(chartId, chartName);
+  });
 
-    const xAxisData = state.allData.map(row => new Date(row.timestamp_iso).getTime());
-    const selectedChartArray = Array.from(state.selectedCharts);
-    const totalCharts = selectedChartArray.length;
-
-    selectedChartArray.forEach((chartName, idx) => {
-        const chartType = state.chartTypes.find(ct => ct.name === chartName);
-        if (!chartType) return;
-
-        // Create container div
-        const chartDiv = document.createElement('div');
-        chartDiv.className = 'chart-container stacked-chart';
-        chartDiv.innerHTML = `
-            <h3 id="chart-title-${idx}">${chartType.label}</h3>
-            <div id="chart-${idx}" class="chart"></div>
-        `;
-        container.appendChild(chartDiv);
-
-        // Extract data
-        const seriesData = state.allData.map(row => row[chartName] || null);
-
-        // Determine color based on chart type
-        let color = '#1b9e77';
-        if (chartName.includes('error')) {
-            color = '#d95f02';
-        }
-
-        // Create chart config
-        const config = {
-            tooltip: { trigger: 'axis' },
-            legend: { data: [chartType.label] },
-            xAxis: { type: 'time', data: xAxisData },
-            yAxis: { type: 'value' },
-            grid: { left: '10%', right: '5%', top: '15%', bottom: '10%' },
-            series: [{
-                name: chartType.label,
-                data: seriesData,
-                type: 'line',
-                smooth: false,
-                itemStyle: { color },
-                areaStyle: { color: `${color}33` }
-            }],
-            dataZoom: [
-                { type: 'inside', xAxisIndex: [0] },
-                { type: 'slider', xAxisIndex: [0], show: idx === totalCharts - 1 }
-            ]
-        };
-
-        // Initialize chart
-        const chartInstance = initChart(`chart-${idx}`, config);
-        state.chartInstances[chartName] = chartInstance;
+  // Remove charts that are no longer selected
+  const chartsContainer = document.getElementById(`charts-container`);
+  if (chartsContainer) {
+    const allChartDivs = chartsContainer.querySelectorAll('[id^="chart-"]');
+    allChartDivs.forEach((div, index) => {
+      if (index >= selectedArray.length) {
+        div.remove();
+      }
     });
-
-    // Sync X-axis across all charts
-    if (Object.keys(state.chartInstances).length > 1) {
-        const charts = Object.entries(state.chartInstances).map(([name, instance], idx) => ({
-            id: `chart-${idx}`,
-            instance
-        }));
-        if (charts.length > 0) {
-            syncChartZoom(charts, `chart-0`);
-        }
-    }
+  }
 }
 
 /**
- * Update date inputs
+ * Render a single next-wave chart.
  */
-function updateDateInputs(startDate, endDate) {
-    const startInput = document.getElementById('startDate');
-    const endInput = document.getElementById('endDate');
-    if (startInput) startInput.valueAsDate = startDate;
-    if (endInput) endInput.valueAsDate = endDate;
+function renderChart(chartId, columnName) {
+  const chartConfig = NEXTWAVE_COLUMNS.find((c) => c.name === columnName);
+  if (!chartConfig) return;
+
+  const timeAxis = currentData.map((row) => row.timestamp_iso);
+
+  let series;
+
+  if (columnName === 'nextwave') {
+    // Categorical state chart
+    series = [
+      {
+        name: 'NextWave State',
+        data: currentData.map((row) => row.nextwave || ''),
+        type: 'line',
+        smooth: true,
+        color: '#7570b3',
+      },
+    ];
+  } else {
+    // Numeric chart
+    series = [
+      {
+        name: chartConfig.label,
+        data: currentData.map((row) => parseFloat(row[columnName]) || null),
+        type: 'line',
+        smooth: true,
+        color: '#d95f02',
+        areaStyle: { opacity: 0.3 },
+      },
+    ];
+  }
+
+  const option = {
+    title: { text: chartConfig.label },
+    tooltip: { trigger: 'axis' },
+    xAxis: {
+      type: 'category',
+      data: timeAxis,
+    },
+    yAxis: {
+      type: columnName === 'nextwave' ? 'category' : 'value',
+      name: chartConfig.unit,
+    },
+    series,
+    dataZoom: [{ type: 'slider', show: true }],
+  };
+
+  charts[chartId] = initChart(chartId, option);
 }
 
 /**
- * Set up date range change listener
+ * Setup date range picker.
  */
-function setupDateRangeListener(manifest) {
-    const applyBtn = document.getElementById('applyDateRange');
-    const resetBtn = document.getElementById('resetDateRange');
-    const startInput = document.getElementById('startDate');
-    const endInput = document.getElementById('endDate');
+function setupDateRangePicker(manifest, defaultStart, defaultEnd) {
+  const startInput = document.getElementById('date-start');
+  const endInput = document.getElementById('date-end');
 
-    if (applyBtn) {
-        applyBtn.addEventListener('click', async () => {
-            const startDate = startInput.valueAsDate;
-            const endDate = endInput.valueAsDate;
+  if (!startInput || !endInput) return;
 
-            if (startDate && endDate) {
-                state.startDate = startDate;
-                state.endDate = endDate;
+  startInput.valueAsDate = defaultStart;
+  endInput.valueAsDate = defaultEnd;
 
-                try {
-                    state.allData = await fetchDataForDateRange(manifest, startDate, endDate);
-                    renderCharts();
+  const handleDateChange = () => {
+    const start = startInput.valueAsDate;
+    const end = endInput.valueAsDate;
 
-                    setURLParams({
-                        start: formatDateForURL(startDate),
-                        end: formatDateForURL(endDate)
-                    });
-                } catch (error) {
-                    console.error('Failed to fetch data for new date range:', error);
-                }
-            }
-        });
+    if (start && end && start <= end) {
+      fetchAndRenderData(start, end);
     }
+  };
 
-    if (resetBtn) {
-        resetBtn.addEventListener('click', () => {
-            const { maxDate } = manifest.availableDateRange;
-            const defaultEnd = parseDateFromURL(maxDate);
-            const defaultStart = new Date(defaultEnd);
-            defaultStart.setDate(defaultStart.getDate() - 2);
+  startInput.addEventListener('change', handleDateChange);
+  endInput.addEventListener('change', handleDateChange);
+}
 
-            updateDateInputs(defaultStart, defaultEnd);
-            applyBtn?.click();
-        });
-    }
+/**
+ * Update URL params with current state.
+ */
+function updateURLParams() {
+  const startInput = document.getElementById('date-start');
+  const endInput = document.getElementById('date-end');
+
+  setURLParams({
+    start: startInput?.valueAsDate,
+    end: endInput?.valueAsDate,
+    chartTypes: Array.from(selectedCharts),
+  });
+}
+
+/**
+ * Show or hide loading state.
+ */
+function showLoadingState(isLoading) {
+  const loader = document.getElementById('loading-indicator');
+  if (loader) {
+    loader.style.display = isLoading ? 'block' : 'none';
+  }
+}
+
+/**
+ * Show error message.
+ */
+function showError(message) {
+  const errorContainer = document.getElementById('error-message');
+  if (errorContainer) {
+    errorContainer.textContent = message;
+    errorContainer.style.display = 'block';
+  }
 }
 
 // Initialize on page load
-document.addEventListener('DOMContentLoaded', initNextWavePage);
+document.addEventListener('DOMContentLoaded', init);
+
+export { init };

@@ -1,83 +1,140 @@
 /**
- * urlParams.js
- * Parse and write URL query parameters for bookmarking/sharing views
+ * URL parameter parsing and management for bookmarking/sharing views.
  */
 
 /**
- * Parse current URL query string
- * @returns {Object} Object with date range and filter state
+ * Parse current URL query parameters into an object.
+ * @returns {object} - Parsed query params with keys like 'start', 'end', 'controllers', 'seaStates'
  */
-export function getURLParams() {
-    const params = new URLSearchParams(window.location.search);
-    return {
-        start: params.get('start'),
-        end: params.get('end'),
-        controllers: params.getAll('controller'),
-        seaStates: params.getAll('seastate'),
-        charts: params.getAll('chart')
-    };
+function getURLParams() {
+  const params = new URLSearchParams(window.location.search);
+  const result = {};
+
+  // Date range
+  result.start = params.get('start') ? new Date(params.get('start')) : null;
+  result.end = params.get('end') ? new Date(params.get('end')) : null;
+
+  // Controllers (comma-separated list of names)
+  result.controllers = params.get('controllers')
+    ? params.get('controllers').split(',')
+    : [];
+
+  // Sea states (comma-separated list of "hs,tp")
+  result.seaStates = params.get('seaStates')
+    ? params.get('seaStates').split(';').map((pair) => {
+        const [hs, tp] = pair.split(',');
+        return { hs: parseFloat(hs), tp: parseFloat(tp) };
+      })
+    : [];
+
+  // Chart types (for Selector and NextWave pages)
+  result.chartTypes = params.get('chartTypes')
+    ? params.get('chartTypes').split(',')
+    : [];
+
+  return result;
 }
 
 /**
- * Update URL with new query parameters (updates browser history)
- * @param {Object} params - Object with start, end, controllers, seaStates, charts
+ * Update browser URL with new query parameters.
+ * Does not reload the page, updates history for bookmarking.
+ * @param {object} params - Object with keys like 'start', 'end', 'controllers', 'seaStates', 'chartTypes'
  */
-export function setURLParams(params) {
-    const queryParams = new URLSearchParams();
+function setURLParams(params) {
+  const queryParams = new URLSearchParams();
 
-    if (params.start) queryParams.set('start', params.start);
-    if (params.end) queryParams.set('end', params.end);
+  // Date range
+  if (params.start) {
+    queryParams.set('start', formatDateForURL(params.start));
+  }
+  if (params.end) {
+    queryParams.set('end', formatDateForURL(params.end));
+  }
 
-    if (params.controllers && Array.isArray(params.controllers)) {
-        params.controllers.forEach(c => queryParams.append('controller', c));
-    }
+  // Controllers
+  if (params.controllers && params.controllers.length > 0) {
+    queryParams.set('controllers', params.controllers.join(','));
+  }
 
-    if (params.seaStates && Array.isArray(params.seaStates)) {
-        params.seaStates.forEach(s => queryParams.append('seastate', s));
-    }
+  // Sea states
+  if (params.seaStates && params.seaStates.length > 0) {
+    const seaStateStrings = params.seaStates.map((ss) => `${ss.hs},${ss.tp}`);
+    queryParams.set('seaStates', seaStateStrings.join(';'));
+  }
 
-    if (params.charts && Array.isArray(params.charts)) {
-        params.charts.forEach(c => queryParams.append('chart', c));
-    }
+  // Chart types
+  if (params.chartTypes && params.chartTypes.length > 0) {
+    queryParams.set('chartTypes', params.chartTypes.join(','));
+  }
 
-    const newURL = `${window.location.pathname}?${queryParams.toString()}`;
-    window.history.replaceState(null, '', newURL);
+  const newURL = `${window.location.pathname}${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
+  window.history.replaceState({ path: newURL }, '', newURL);
 }
 
 /**
- * Format Date object or string to YYYY-MM-DD for URL
+ * Format a Date object or ISO string for URL parameter.
  * @param {Date|string} date - Date object or ISO string
- * @returns {string} YYYY-MM-DD format
+ * @returns {string} - ISO 8601 format (YYYY-MM-DDTHH:mm:ssZ)
  */
-export function formatDateForURL(date) {
-    if (typeof date === 'string') {
-        return date.split('T')[0];
-    }
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+function formatDateForURL(date) {
+  if (typeof date === 'string') {
+    return new Date(date).toISOString();
+  }
+  if (date instanceof Date) {
+    return date.toISOString();
+  }
+  return '';
 }
 
 /**
- * Parse URL date string (YYYY-MM-DD) to Date object
- * @param {string} dateStr - YYYY-MM-DD format
- * @returns {Date} Date object (midnight UTC)
+ * Parse a URL date string to a Date object.
+ * @param {string} dateStr - ISO 8601 or YYYY-MM-DD format
+ * @returns {Date} - Parsed Date object
  */
-export function parseDateFromURL(dateStr) {
-    return new Date(dateStr + 'T00:00:00Z');
+function parseDateFromURL(dateStr) {
+  return new Date(dateStr);
 }
 
 /**
- * Get date range with defaults if not in URL
- * @param {string} defaultStart - Default start date (YYYY-MM-DD)
- * @param {string} defaultEnd - Default end date (YYYY-MM-DD)
- * @returns {Object} {start: Date, end: Date}
+ * Get default date range based on available data.
+ * @param {object} manifest - Manifest object with availableDateRange
+ * @returns {object} - {start, end} Date objects
  */
-export function getDateRangeWithDefaults(defaultStart, defaultEnd) {
-    const params = getURLParams();
+function getDefaultDateRange(manifest) {
+  if (!manifest || !manifest.availableDateRange) {
     return {
-        start: params.start ? parseDateFromURL(params.start) : parseDateFromURL(defaultStart),
-        end: params.end ? parseDateFromURL(params.end) : parseDateFromURL(defaultEnd)
+      start: new Date(),
+      end: new Date(),
     };
+  }
+
+  const maxDate = new Date(manifest.availableDateRange.maxDate);
+  const minDate = new Date(manifest.availableDateRange.minDate);
+
+  return {
+    start: minDate,
+    end: maxDate,
+  };
 }
+
+/**
+ * Get last N days from today (or from maxDate).
+ * @param {number} days - Number of days
+ * @param {Date} fromDate - Base date (default: today)
+ * @returns {object} - {start, end} Date objects
+ */
+function getLastNDays(days, fromDate = new Date()) {
+  const end = new Date(fromDate);
+  const start = new Date(fromDate);
+  start.setDate(start.getDate() - days);
+  return { start, end };
+}
+
+export {
+  getURLParams,
+  setURLParams,
+  formatDateForURL,
+  parseDateFromURL,
+  getDefaultDateRange,
+  getLastNDays,
+};

@@ -1,282 +1,358 @@
 /**
- * homepage.js
- * Homepage (index.html) initialization, state management, and chart rendering
+ * Homepage initialization and state management.
+ * Displays overview of power, efficiency, controllers, and sea states.
  */
 
 import { initNavigation } from '../shared/navigation.js';
-import { fetchManifest, fetchDayFile, parseCSV, filterByDateRange, getUniqueControllers, getSeaStateScatter } from '../shared/dataFetcher.js';
-import { initChart, syncChartZoom, getColorForControllerIndex } from '../shared/chartUtils.js';
-import { CONTROLLER_COLOR_PALETTE } from '../shared/colorScheme.js';
-import { getURLParams, setURLParams, formatDateForURL, parseDateFromURL, getDateRangeWithDefaults } from '../utils/urlParams.js';
+import {
+  fetchManifest,
+  fetchDataForDateRange,
+  getUniqueControllers,
+  getSeaStateScatter,
+  filterByDateRange,
+} from '../shared/dataFetcher.js';
+import { initChart, resizeAllCharts, getColorForController } from '../shared/chartUtils.js';
+import { getURLParams, setURLParams, getDefaultDateRange, getLastNDays } from '../utils/urlParams.js';
+import { getColor } from '../shared/colorScheme.js';
+
+let currentData = [];
+let currentControllers = [];
+let currentSeaStates = [];
+let charts = {
+  avgPower: null,
+  efficiency: null,
+  hsScatter: null,
+  tpScatter: null,
+  seaStateScatter: null,
+};
 
 /**
- * Initialize homepage
+ * Initialize the homepage.
  */
-async function initHomepage() {
-    // 1. Initialize navigation
-    initNavigation();
+async function init() {
+  initNavigation();
 
-    // 2. Load manifest and set up date range
-    let manifest;
-    try {
-        manifest = await fetchManifest();
-    } catch (error) {
-        console.error('Failed to load manifest:', error);
-        document.body.innerHTML = '<p>Error loading data manifest. Please try again later.</p>';
-        return;
-    }
+  try {
+    // Get manifest and validate date range from URL
+    const manifest = await fetchManifest();
+    const urlParams = getURLParams();
+    const defaultRange = getDefaultDateRange(manifest);
 
-    const { minDate, maxDate } = manifest.availableDateRange;
-    const dateRange = getDateRangeWithDefaults(minDate, maxDate);
-    updateDateInputs(dateRange.start, dateRange.end);
+    const startDate = urlParams.start || defaultRange.start;
+    const endDate = urlParams.end || defaultRange.end;
 
-    // 3. Fetch all data for date range
-    let allData = [];
-    try {
-        allData = await fetchDataForDateRange(manifest, dateRange.start, dateRange.end);
-    } catch (error) {
-        console.error('Failed to fetch data:', error);
-        document.body.innerHTML = '<p>Error loading data. Please try again later.</p>';
-        return;
-    }
+    // Fetch data
+    await fetchAndRenderData(startDate, endDate);
 
-    // 4. Extract controllers and sea states
-    const controllers = getUniqueControllers(allData);
-    const seaStatePoints = getSeaStateScatter(allData);
+    // Setup event listeners
+    setupDateRangePicker(manifest);
+    window.addEventListener('resize', () => resizeAllCharts());
+  } catch (error) {
+    console.error('Homepage initialization error:', error);
+    showError('Failed to load data. Please refresh the page.');
+  }
+}
 
-    // 5. Populate controller list
-    populateControllerList(controllers);
+/**
+ * Fetch data for date range and render all charts.
+ */
+async function fetchAndRenderData(startDate, endDate) {
+  try {
+    // Show loading state
+    showLoadingState(true);
 
-    // 6. Initialize charts
-    const chartInstances = {
-        avgPower: null,
-        efficiency: null,
-        hs: null,
-        tp: null,
-        seaState: null
+    // Fetch data
+    currentData = await fetchDataForDateRange(startDate, endDate);
+    currentControllers = getUniqueControllers(currentData);
+    currentSeaStates = getSeaStateScatter(currentData);
+
+    // Render charts
+    renderAvgPowerChart();
+    renderEfficiencyChart();
+    renderHsScatterChart();
+    renderTpScatterChart();
+    renderSeaStateScatterChart();
+    renderControllerList();
+
+    // Update URL params
+    setURLParams({
+      start: startDate,
+      end: endDate,
+    });
+
+    showLoadingState(false);
+  } catch (error) {
+    console.error('Error fetching data:', error);
+    showLoadingState(false);
+    showError('Failed to fetch data for the selected range.');
+  }
+}
+
+/**
+ * Render average power chart (large line/area chart).
+ */
+function renderAvgPowerChart() {
+  const timeAxis = currentData.map((row) => row.timestamp_iso);
+  const powerSeries = currentControllers.map((controller) => ({
+    name: controller,
+    data: currentData.map((row) =>
+      row.controller === controller ? parseFloat(row.avg_power) || null : null
+    ),
+    type: 'line',
+    smooth: true,
+    color: getColorForController(
+      controller,
+      Object.fromEntries(currentControllers.map((c, i) => [c, i]))
+    ),
+  }));
+
+  const option = {
+    title: { text: 'Average Power (W)' },
+    tooltip: { trigger: 'axis' },
+    legend: { data: currentControllers },
+    xAxis: {
+      type: 'category',
+      data: timeAxis,
+    },
+    yAxis: { type: 'value', name: 'Watts' },
+    series: powerSeries,
+    dataZoom: [{ type: 'slider', show: true, yAxisIndex: [0] }],
+  };
+
+  charts.avgPower = initChart('chart-avg-power', option);
+}
+
+/**
+ * Render efficiency chart (large line/area chart).
+ */
+function renderEfficiencyChart() {
+  const timeAxis = currentData.map((row) => row.timestamp_iso);
+  const efficiencySeries = currentControllers.map((controller) => ({
+    name: controller,
+    data: currentData.map((row) =>
+      row.controller === controller ? parseFloat(row.efficiency) || null : null
+    ),
+    type: 'line',
+    smooth: true,
+    color: getColorForController(
+      controller,
+      Object.fromEntries(currentControllers.map((c, i) => [c, i]))
+    ),
+  }));
+
+  const option = {
+    title: { text: 'Efficiency (%)' },
+    tooltip: { trigger: 'axis' },
+    legend: { data: currentControllers },
+    xAxis: {
+      type: 'category',
+      data: timeAxis,
+    },
+    yAxis: { type: 'value', name: 'Percentage' },
+    series: efficiencySeries,
+    dataZoom: [{ type: 'slider', show: true }],
+  };
+
+  charts.efficiency = initChart('chart-efficiency', option);
+}
+
+/**
+ * Render Hs (wave height) scatter chart.
+ */
+function renderHsScatterChart() {
+  const scatterData = currentData.map((row, index) => ({
+    value: [index, parseFloat(row.hs) || 0],
+    controller: row.controller,
+  }));
+
+  const option = {
+    title: { text: 'Wave Height - Hs (m)' },
+    tooltip: { trigger: 'item' },
+    xAxis: { type: 'category', name: 'Time' },
+    yAxis: { type: 'value', name: 'Hs (m)' },
+    series: [
+      {
+        name: 'Hs',
+        data: scatterData,
+        type: 'scatter',
+        symbolSize: 4,
+        itemStyle: {
+          color: (params) => {
+            const controller = params.data.controller;
+            const index = currentControllers.indexOf(controller);
+            return getColor(index);
+          },
+        },
+      },
+    ],
+  };
+
+  charts.hsScatter = initChart('chart-hs-scatter', option);
+}
+
+/**
+ * Render Tp (wave period) scatter chart.
+ */
+function renderTpScatterChart() {
+  const scatterData = currentData.map((row, index) => ({
+    value: [index, parseFloat(row.tp) || 0],
+    controller: row.controller,
+  }));
+
+  const option = {
+    title: { text: 'Wave Period - Tp (s)' },
+    tooltip: { trigger: 'item' },
+    xAxis: { type: 'category', name: 'Time' },
+    yAxis: { type: 'value', name: 'Tp (s)' },
+    series: [
+      {
+        name: 'Tp',
+        data: scatterData,
+        type: 'scatter',
+        symbolSize: 4,
+        itemStyle: {
+          color: (params) => {
+            const controller = params.data.controller;
+            const index = currentControllers.indexOf(controller);
+            return getColor(index);
+          },
+        },
+      },
+    ],
+  };
+
+  charts.tpScatter = initChart('chart-tp-scatter', option);
+}
+
+/**
+ * Render sea state scatter chart (Tp vs Hs, colored by controller).
+ */
+function renderSeaStateScatterChart() {
+  // Group sea states by controller
+  const controllerMap = Object.fromEntries(
+    currentControllers.map((c, i) => [c, i])
+  );
+
+  const series = currentControllers.map((controller) => {
+    const seaStatesForController = currentSeaStates
+      .filter((ss) => ss.controllers.has(controller))
+      .map((ss) => [parseFloat(ss.tp), parseFloat(ss.hs)]);
+
+    return {
+      name: controller,
+      data: seaStatesForController,
+      type: 'scatter',
+      symbolSize: 6,
+      color: getColor(controllerMap[controller]),
     };
+  });
 
-    renderCharts(allData, controllers, chartInstances);
+  const option = {
+    title: { text: 'Sea State (Tp vs Hs)' },
+    tooltip: { trigger: 'item' },
+    xAxis: { type: 'value', name: 'Tp (s)' },
+    yAxis: { type: 'value', name: 'Hs (m)' },
+    legend: { data: currentControllers },
+    series,
+  };
 
-    // 7. Set up event listeners
-    setupDateRangeListener(manifest, allData, controllers, chartInstances);
+  charts.seaStateScatter = initChart('chart-sea-state-scatter', option);
 }
 
 /**
- * Fetch all CSV data for date range
- * @param {Object} manifest - Manifest data
- * @param {Date} startDate - Start date
- * @param {Date} endDate - End date
- * @returns {Promise<Array>} Merged data rows
+ * Render active controller list on the right sidebar.
  */
-async function fetchDataForDateRange(manifest, startDate, endDate) {
-    const allRows = [];
-    const current = new Date(startDate);
+function renderControllerList() {
+  const listContainer = document.getElementById('controller-list');
+  if (!listContainer) return;
 
-    while (current <= endDate) {
-        const dateStr = formatDateForURL(current);
-        if (manifest.dayFiles.includes(dateStr)) {
-            try {
-                const csvText = await fetchDayFile(dateStr);
-                const rows = parseCSV(csvText);
-                allRows.push(...rows);
-            } catch (error) {
-                console.warn(`Failed to fetch day file ${dateStr}:`, error);
-            }
-        }
-        current.setDate(current.getDate() + 1);
+  listContainer.innerHTML = '';
+
+  const controllerMap = Object.fromEntries(
+    currentControllers.map((c, i) => [c, i])
+  );
+
+  currentControllers.forEach((controller) => {
+    const item = document.createElement('div');
+    item.style.cssText = `
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 0;
+      font-size: 14px;
+      color: #333333;
+    `;
+
+    const indicator = document.createElement('span');
+    indicator.textContent = '●';
+    indicator.style.cssText = `
+      color: ${getColor(controllerMap[controller])};
+      font-size: 16px;
+    `;
+
+    const label = document.createElement('span');
+    label.textContent = controller;
+
+    item.appendChild(indicator);
+    item.appendChild(label);
+    listContainer.appendChild(item);
+  });
+}
+
+/**
+ * Setup date range picker with event listeners.
+ */
+function setupDateRangePicker(manifest) {
+  const startInput = document.getElementById('date-start');
+  const endInput = document.getElementById('date-end');
+
+  if (!startInput || !endInput) return;
+
+  // Set current values
+  const urlParams = getURLParams();
+  const defaultRange = getDefaultDateRange(manifest);
+  const startDate = urlParams.start || defaultRange.start;
+  const endDate = urlParams.end || defaultRange.end;
+
+  startInput.valueAsDate = startDate;
+  endInput.valueAsDate = endDate;
+
+  // Handle changes
+  const handleDateChange = () => {
+    const start = startInput.valueAsDate;
+    const end = endInput.valueAsDate;
+
+    if (start && end && start <= end) {
+      fetchAndRenderData(start, end);
     }
+  };
 
-    return allRows;
+  startInput.addEventListener('change', handleDateChange);
+  endInput.addEventListener('change', handleDateChange);
 }
 
 /**
- * Populate controller indicator list
- * @param {Array<string>} controllers - Controller names
+ * Show or hide loading state.
  */
-function populateControllerList(controllers) {
-    const listEl = document.getElementById('controllerList');
-    if (!listEl) return;
-
-    listEl.innerHTML = '';
-    controllers.forEach((controller, idx) => {
-        const color = CONTROLLER_COLOR_PALETTE[idx % CONTROLLER_COLOR_PALETTE.length];
-        const li = document.createElement('li');
-        li.innerHTML = `
-            <span class="controller-indicator active" style="background-color: ${color};"></span>
-            <span>${controller}</span>
-        `;
-        listEl.appendChild(li);
-    });
+function showLoadingState(isLoading) {
+  const loader = document.getElementById('loading-indicator');
+  if (loader) {
+    loader.style.display = isLoading ? 'block' : 'none';
+  }
 }
 
 /**
- * Render all homepage charts
- * @param {Array<Object>} data - Data rows
- * @param {Array<string>} controllers - Controller names
- * @param {Object} chartInstances - Chart instance container
+ * Show error message.
  */
-function renderCharts(data, controllers, chartInstances) {
-    if (data.length === 0) return;
-
-    // Extract X-axis time data
-    const xAxisData = data.map(row => new Date(row.timestamp_iso).getTime());
-
-    // Chart 1: Avg Power (line/area)
-    const avgPowerData = data.map(row => row.avg_power || null);
-    chartInstances.avgPower = initChart('chartAvgPower', {
-        tooltip: { trigger: 'axis' },
-        legend: { data: ['Avg Power'] },
-        xAxis: { type: 'time', data: xAxisData },
-        yAxis: { type: 'value' },
-        grid: { left: '10%', right: '5%', top: '15%', bottom: '10%' },
-        series: [{
-            name: 'Avg Power',
-            data: avgPowerData,
-            type: 'line',
-            smooth: false,
-            itemStyle: { color: '#1b9e77' },
-            areaStyle: { color: 'rgba(27, 158, 119, 0.2)' }
-        }],
-        dataZoom: [
-            { type: 'inside', xAxisIndex: [0] },
-            { type: 'slider', xAxisIndex: [0], show: true }
-        ]
-    });
-
-    // Chart 2: Efficiency (line/area)
-    const efficiencyData = data.map(row => row.efficiency || null);
-    chartInstances.efficiency = initChart('chartEfficiency', {
-        tooltip: { trigger: 'axis' },
-        legend: { data: ['Efficiency'] },
-        xAxis: { type: 'time', data: xAxisData },
-        yAxis: { type: 'value' },
-        grid: { left: '10%', right: '5%', top: '15%', bottom: '10%' },
-        series: [{
-            name: 'Efficiency',
-            data: efficiencyData,
-            type: 'line',
-            smooth: false,
-            itemStyle: { color: '#d95f02' },
-            areaStyle: { color: 'rgba(217, 95, 2, 0.2)' }
-        }],
-        dataZoom: [
-            { type: 'inside', xAxisIndex: [0] },
-            { type: 'slider', xAxisIndex: [0], show: true }
-        ]
-    });
-
-    // Chart 3: Hs Scatter
-    const hsScatterData = data.map((row, idx) => [xAxisData[idx], row.hs || 0]);
-    chartInstances.hs = initChart('chartHs', {
-        tooltip: { trigger: 'item' },
-        legend: { data: ['Hs'] },
-        xAxis: { type: 'time' },
-        yAxis: { type: 'value' },
-        grid: { left: '10%', right: '5%', top: '15%', bottom: '10%' },
-        series: [{
-            name: 'Hs',
-            data: hsScatterData,
-            type: 'scatter',
-            symbolSize: 4,
-            itemStyle: { color: '#7570b3' }
-        }],
-        dataZoom: [{ type: 'inside', xAxisIndex: [0] }]
-    });
-
-    // Chart 4: Tp Scatter
-    const tpScatterData = data.map((row, idx) => [xAxisData[idx], row.tp || 0]);
-    chartInstances.tp = initChart('chartTp', {
-        tooltip: { trigger: 'item' },
-        legend: { data: ['Tp'] },
-        xAxis: { type: 'time' },
-        yAxis: { type: 'value' },
-        grid: { left: '10%', right: '5%', top: '15%', bottom: '10%' },
-        series: [{
-            name: 'Tp',
-            data: tpScatterData,
-            type: 'scatter',
-            symbolSize: 4,
-            itemStyle: { color: '#e7298a' }
-        }],
-        dataZoom: [{ type: 'inside', xAxisIndex: [0] }]
-    });
-
-    // Chart 5: Sea State Scatter (Hs vs Tp)
-    const seaStateData = getSeaStateScatter(data).map(point => [point.tp, point.hs]);
-    chartInstances.seaState = initChart('chartSeaState', {
-        tooltip: { trigger: 'item' },
-        xAxis: { type: 'value', name: 'Tp (s)' },
-        yAxis: { type: 'value', name: 'Hs (m)' },
-        grid: { left: '12%', right: '5%', top: '15%', bottom: '12%' },
-        series: [{
-            name: 'Sea State',
-            data: seaStateData,
-            type: 'scatter',
-            symbolSize: 6,
-            itemStyle: { color: '#333333' }
-        }]
-    });
-
-    // Sync X-axis zoom across time-series charts
-    syncChartZoom([
-        { id: 'avgPower', instance: chartInstances.avgPower },
-        { id: 'efficiency', instance: chartInstances.efficiency },
-        { id: 'hs', instance: chartInstances.hs },
-        { id: 'tp', instance: chartInstances.tp }
-    ], 'avgPower');
-}
-
-/**
- * Update date input fields
- * @param {Date} startDate
- * @param {Date} endDate
- */
-function updateDateInputs(startDate, endDate) {
-    const startInput = document.getElementById('startDate');
-    const endInput = document.getElementById('endDate');
-    if (startInput) startInput.valueAsDate = startDate;
-    if (endInput) endInput.valueAsDate = endDate;
-}
-
-/**
- * Set up date range change listener
- */
-function setupDateRangeListener(manifest, allData, controllers, chartInstances) {
-    const applyBtn = document.getElementById('applyDateRange');
-    const resetBtn = document.getElementById('resetDateRange');
-    const startInput = document.getElementById('startDate');
-    const endInput = document.getElementById('endDate');
-
-    if (applyBtn) {
-        applyBtn.addEventListener('click', async () => {
-            const startDate = startInput.valueAsDate;
-            const endDate = endInput.valueAsDate;
-
-            if (startDate && endDate) {
-                // Filter data for new range
-                const filteredData = filterByDateRange(allData, startDate.getTime(), endDate.getTime());
-
-                // Re-render charts
-                renderCharts(filteredData, controllers, chartInstances);
-
-                // Update URL params
-                setURLParams({
-                    start: formatDateForURL(startDate),
-                    end: formatDateForURL(endDate)
-                });
-            }
-        });
-    }
-
-    if (resetBtn) {
-        resetBtn.addEventListener('click', () => {
-            const { minDate, maxDate } = manifest.availableDateRange;
-            updateDateInputs(parseDateFromURL(minDate), parseDateFromURL(maxDate));
-            applyBtn?.click();
-        });
-    }
+function showError(message) {
+  const errorContainer = document.getElementById('error-message');
+  if (errorContainer) {
+    errorContainer.textContent = message;
+    errorContainer.style.display = 'block';
+  }
 }
 
 // Initialize on page load
-document.addEventListener('DOMContentLoaded', initHomepage);
+document.addEventListener('DOMContentLoaded', init);
+
+export { init };

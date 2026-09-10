@@ -311,8 +311,8 @@ def generate_all_data(args) -> tuple[dict[str, list[dict]], list[dict], dict]:
 
     date_range_info = {
         "availableDateRange": {
-            "startDate": start_iso,
-            "endDate": end_iso,
+            "minDate": start_iso,
+            "maxDate": end_iso,
         },
         "dayFiles": day_files,
         "lastUpdated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -371,8 +371,7 @@ def main(args):
     print(f"  Total day files: {len(daily_data)}")
     print(f"  Total minute records: {sum(len(rows) for rows in daily_data.values()):,}")
     print(f"  Total hourly records: {len(overview_data):,}")
-    print(f"  Date range: {date_range_info['availableDateRange']['startDate']} to {date_range_info['availableDateRange']['endDate']}")
-
+    print(f"  Date range: {date_range_info['availableDateRange']['minDate']} to {date_range_info['availableDateRange']['maxDate']}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

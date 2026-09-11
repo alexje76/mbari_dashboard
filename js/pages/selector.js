@@ -151,7 +151,7 @@ function renderControllerCheckboxes() {
  * Render sea state scatter selector.
  */
 function renderSeaStateScatter() {
-  const container = document.getElementById('sea-state-selector-chart');
+  const container = document.getElementById('seaStateScatter');
   if (!container) return;
 
   const controllerMap = Object.fromEntries(
@@ -187,7 +187,7 @@ function renderSeaStateScatter() {
     ],
   };
 
-  const chart = initChart('sea-state-selector-chart', option);
+  const chart = initChart('seaStateScatter', option);
 
   // Add click handler
   chart.on('click', (params) => {

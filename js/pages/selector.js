@@ -11,6 +11,7 @@ import {
   initChart,
   resizeAllCharts,
   disposeChart,
+  syncChartZoom,
 } from '../shared/chartUtils.js';
 import {
   getURLParams,
@@ -193,6 +194,8 @@ function renderCharts() {
     }
     renderChart(id, type, index);
   });
+
+  chartIds.forEach((id) => syncChartZoom(chartIds, id));
 }
 
 function renderChart(id, type, index) {

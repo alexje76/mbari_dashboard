@@ -63,27 +63,17 @@ function syncChartZoom(chartIds, sourceChartId) {
   if (!sourceChart) return;
 
   sourceChart.on('datazoom', (event) => {
-    // Get the zoom range from source chart's dataZoom
-    const option = sourceChart.getOption();
-    const dataZoom = option.dataZoom?.[0];
+    const start = event.start;
+    const end = event.end;
 
-    if (!dataZoom) return;
-
-    const startPercentage = dataZoom.startValue;
-    const endPercentage = dataZoom.endValue;
-
-    // Apply same zoom to other charts
     chartIds.forEach((id) => {
-      if (id === sourceChartId) return; // Skip source
+      if (id === sourceChartId) return;
 
       const targetChart = chartRegistry.get(id);
       if (targetChart) {
-        const targetOption = targetChart.getOption();
-        if (targetOption.dataZoom) {
-          targetOption.dataZoom[0].startValue = startPercentage;
-          targetOption.dataZoom[0].endValue = endPercentage;
-          targetChart.setOption(targetOption);
-        }
+        targetChart.setOption({
+          dataZoom: [{ start, end }],
+        });
       }
     });
   });

@@ -109,7 +109,7 @@ function renderBatteryChart() {
     dataZoom: [{ type: 'slider', show: true }],
   };
 
-  charts.battery = initChart('chart-battery', option);
+  charts.battery = initChart('chartBattery', option);
 }
 
 /**

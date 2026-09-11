@@ -119,7 +119,7 @@ function renderAvgPowerChart() {
     dataZoom: [{ type: 'slider', show: true, yAxisIndex: [0] }],
   };
 
-  charts.avgPower = initChart('chart-avg-power', option);
+  charts.avgPower = initChart('chartAvgPower', option);
 }
 
 /**
@@ -153,7 +153,7 @@ function renderEfficiencyChart() {
     dataZoom: [{ type: 'slider', show: true }],
   };
 
-  charts.efficiency = initChart('chart-efficiency', option);
+  charts.efficiency = initChart('chartEfficiency', option);
 }
 
 /**
@@ -187,7 +187,7 @@ function renderHsScatterChart() {
     ],
   };
 
-  charts.hsScatter = initChart('chart-hs-scatter', option);
+  charts.hsScatter = initChart('chartHs', option);
 }
 
 /**
@@ -221,7 +221,7 @@ function renderTpScatterChart() {
     ],
   };
 
-  charts.tpScatter = initChart('chart-tp-scatter', option);
+  charts.tpScatter = initChart('chartTp', option);
 }
 
 /**
@@ -256,14 +256,14 @@ function renderSeaStateScatterChart() {
     series,
   };
 
-  charts.seaStateScatter = initChart('chart-sea-state-scatter', option);
+  charts.seaStateScatter = initChart('chartSeaState', option);
 }
 
 /**
  * Render active controller list on the right sidebar.
  */
 function renderControllerList() {
-  const listContainer = document.getElementById('controller-list');
+  const listContainer = document.getElementById('controllerList');
   if (!listContainer) return;
 
   listContainer.innerHTML = '';

@@ -13,6 +13,12 @@ import {
 
 // Map to track all chart instances on a page for zoom sync
 const chartRegistry = new Map();
+const zoomRanges = new Map();
+const zoomSyncing = new Set();
+
+function zoomGroupKey(chartIds) {
+  return chartIds.join('|');
+}
 
 /**
  * Initialize an ECharts instance with common settings.
@@ -58,31 +64,72 @@ function initChart(domId, options) {
  * @param {string[]} chartIds - Array of chart DOM IDs
  * @param {string} sourceChartId - ID of the chart that triggered the zoom
  */
-function syncChartZoom(chartIds) {
+function syncChartZoom(chartIds, { reset = false } = {}) {
+  const groupKey = zoomGroupKey(chartIds);
+  if (reset) zoomRanges.delete(groupKey);
+
   chartIds.forEach((sourceId) => {
     const sourceChart = chartRegistry.get(sourceId);
     if (!sourceChart) return;
 
-    sourceChart.off('datazoom');
-    sourceChart.on('datazoom', (event) => {
-      const zoom = event.batch?.[0] || event;
-      const start = zoom.start;
-      const end = zoom.end;
-      if (start == null || end == null) return;
+    if (sourceChart.__zoomSyncHandler) {
+      sourceChart.off('datazoom', sourceChart.__zoomSyncHandler);
+    }
 
-      chartIds.forEach((targetId) => {
-        if (targetId === sourceId) return;
-        const targetChart = chartRegistry.get(targetId);
-        if (targetChart) {
-          targetChart.dispatchAction({
+    const handler = (event) => {
+      if (zoomSyncing.has(groupKey)) return;
+
+      const zoom = event.batch?.[0] || event;
+      let { startValue, endValue } = zoom;
+      const axisData = sourceChart.getOption().xAxis?.[0]?.data || [];
+
+      // Convert category indexes to the actual timestamp strings.
+      if (axisData.length) {
+        if (Number.isInteger(startValue)) startValue = axisData[startValue];
+        if (Number.isInteger(endValue)) endValue = axisData[endValue];
+      }
+
+      if (startValue == null || endValue == null) return;
+      const range = { startValue, endValue };
+      zoomRanges.set(groupKey, range);
+
+      zoomSyncing.add(groupKey);
+      try {
+        chartIds.forEach((targetId) => {
+          if (targetId === sourceId) return;
+          chartRegistry.get(targetId)?.dispatchAction({
             type: 'dataZoom',
-            start,
-            end,
+            ...range,
           });
-        }
+        });
+      } finally {
+        zoomSyncing.delete(groupKey);
+      }
+    };
+
+    sourceChart.__zoomSyncHandler = handler;
+    sourceChart.on('datazoom', handler);
+  });
+
+  // Apply the saved timestamp range to charts created after a rerender.
+  const savedRange = zoomRanges.get(groupKey);
+  if (!savedRange) return;
+
+  zoomSyncing.add(groupKey);
+  try {
+    chartIds.forEach((chartId) => {
+      chartRegistry.get(chartId)?.dispatchAction({
+        type: 'dataZoom',
+        ...savedRange,
       });
     });
-  });
+  } finally {
+    zoomSyncing.delete(groupKey);
+  }
+}
+
+function resetChartZoom(chartIds) {
+  zoomRanges.delete(zoomGroupKey(chartIds));
 }
 
 /**
@@ -208,6 +255,7 @@ function resizeAllCharts() {
 export {
   initChart,
   syncChartZoom,
+  resetChartZoom,
   getColorForController,
   addVerticalBarOverlay,
   addHorizontalAvgLine,

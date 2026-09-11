@@ -12,6 +12,7 @@ import {
   resizeAllCharts,
   disposeChart,
   syncChartZoom,
+  resetChartZoom,
 } from '../shared/chartUtils.js';
 import {
   getURLParams,
@@ -250,6 +251,7 @@ function setupDateRangePicker(manifest, start, end) {
       showError('Choose a valid date range.');
       return;
     }
+    resetChartZoom(chartIds);
     fetchAndRenderData(nextStart, nextEnd, getURLParams()).catch(() => {});
   };
   document.getElementById('applyDateRange')?.addEventListener('click', apply);

@@ -20,7 +20,7 @@ import {
   setURLParams,
   getDefaultDateRange,
 } from '../utils/urlParams.js';
-import { getColor } from '../shared/colorScheme.js';
+import { getColor, deselectedSeaStatePattern } from '../shared/colorScheme.js';
 
 const BASE_PATH = '/mbari_dashboard';
 const chartIds = ['chart1', 'chart2', 'chart3'];
@@ -32,6 +32,9 @@ let selectedControllers = new Set();
 let selectedSeaStates = new Set();
 let chartTypes = ['', '', ''];
 let chartTypesConfig = {};
+const chartInstances = new Map();
+let currentTimelineTimes = [];
+let lastSeaStateWindowKey = null;
 
 async function init() {
   initNavigation();
@@ -106,6 +109,8 @@ async function fetchAndRenderData(start, end, params = {}) {
 
     currentControllers = getUniqueControllers(currentData);
     currentSeaStates = getSeaStateScatter(currentData);
+    currentTimelineTimes = [];
+    lastSeaStateWindowKey = null;
     selectedControllers = new Set(
       params.controllers?.length ? params.controllers : currentControllers
     );
@@ -150,24 +155,35 @@ function renderControllerCheckboxes() {
   });
 }
 
-function renderSeaStateScatter() {
-  const data = currentSeaStates.map((state) => {
-    const key = `${state.hs},${state.tp}`;
-    return {
-      key,
-      value: [state.tp, state.hs],
-      itemStyle: {
-        color: selectedSeaStates.has(key) ? '#333' : '#ccc',
-        opacity: selectedSeaStates.has(key) ? 1 : 0.5,
-      },
-    };
+function renderSeaStateScatter(seaStates = currentSeaStates) {
+  const series = currentControllers.map((controller) => {
+    const data = seaStates
+      .filter((state) => state.controllers.has(controller))
+      .map((state) => {
+        const key = `${state.hs},${state.tp}`;
+        const selected = selectedSeaStates.has(key);
+        return {
+          key,
+          value: [parseFloat(state.tp), parseFloat(state.hs)],
+          itemStyle: {
+            color: selected
+              ? getColor(currentControllers.indexOf(controller))
+              : deselectedSeaStatePattern,
+            opacity: selected ? 1 : 0.5,
+          },
+        };
+      });
+    return { name: controller, type: 'scatter', symbolSize: 9, data };
   });
+
   const chart = initChart('seaStateScatter', {
     tooltip: { trigger: 'item' },
     xAxis: { type: 'value', name: 'Tp (s)' },
     yAxis: { type: 'value', name: 'Hs (m)' },
-    series: [{ type: 'scatter', symbolSize: 9, data }],
+    legend: { data: currentControllers },
+    series,
   });
+
   if (chart && !chart.__selectorClickBound) {
     chart.__selectorClickBound = true;
     chart.on('click', ({ data: point }) => {
@@ -175,11 +191,58 @@ function renderSeaStateScatter() {
       selectedSeaStates.has(point.key)
         ? selectedSeaStates.delete(point.key)
         : selectedSeaStates.add(point.key);
-      renderSeaStateScatter();
       renderCharts();
+      const chartInstance =
+        chartInstances.get('chart1') ||
+        chartInstances.get('chart2') ||
+        chartInstances.get('chart3');
+      if (chartInstance) {
+        updateSeaStateScatterForZoom(chartInstance, true);
+      } else {
+        renderSeaStateScatter();
+      }
       updateURLParams();
     });
   }
+}
+
+function updateSeaStateScatterForZoom(chart, force = false) {
+  if (!chart || !currentTimelineTimes.length) return;
+  const dataZoom = chart.getOption().dataZoom;
+  const start = Number(dataZoom?.[0]?.start ?? 0);
+  const end = Number(dataZoom?.[0]?.end ?? 100);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return;
+
+  if (start <= 0.01 && end >= 99.99) {
+    if (!force && lastSeaStateWindowKey === 'full') return;
+    lastSeaStateWindowKey = 'full';
+    renderSeaStateScatter();
+    return;
+  }
+
+  const key = `${start.toFixed(2)}|${end.toFixed(2)}|${currentTimelineTimes.length}`;
+  if (!force && key === lastSeaStateWindowKey) return;
+  lastSeaStateWindowKey = key;
+
+  const last = currentTimelineTimes.length - 1;
+  const startIndex = Math.max(0, Math.round((start / 100) * last));
+  const endIndex = Math.min(last, Math.round((end / 100) * last));
+  const startTime = Date.parse(currentTimelineTimes[startIndex]);
+  const endTime = Date.parse(currentTimelineTimes[endIndex]);
+  if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) return;
+
+  const inWindow = new Set();
+  currentData.forEach((row) => {
+    if (row.hs == null || row.tp == null) return;
+    const time = Date.parse(row.timestamp_iso);
+    if (Number.isFinite(time) && time >= startTime && time <= endTime) {
+      inWindow.add(`${parseFloat(row.hs)},${parseFloat(row.tp)}`);
+    }
+  });
+
+  renderSeaStateScatter(
+    currentSeaStates.filter((state) => inWindow.has(`${state.hs},${state.tp}`))
+  );
 }
 
 function renderCharts() {
@@ -187,6 +250,7 @@ function renderCharts() {
     const type = chartTypes[index];
     if (!type) {
       disposeChart(id);
+      chartInstances.delete(id);
       const el = document.getElementById(id);
       if (el) el.innerHTML = '<p class="empty-chart">Select a chart type.</p>';
       return;
@@ -240,7 +304,12 @@ function renderChart(id, type, index) {
     series,
   });
 
-  if (chart) addVerticalBarOverlay(chart, missingRanges, {});
+  if (chart) {
+    chartInstances.set(id, chart);
+    currentTimelineTimes = times;
+    chart.on('datazoom', () => updateSeaStateScatterForZoom(chart));
+    addVerticalBarOverlay(chart, missingRanges, {});
+  }
   document.getElementById(`chart${index + 1}Title`).textContent =
     chartTypesConfig[type]?.label || type;
 }

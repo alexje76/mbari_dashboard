@@ -10,7 +10,7 @@
  */
 function initNavigation() {
   // Find existing hamburger button (already in HTML)
-  const hamburger = document.getElementById('hamburger-btn');
+  const hamburger = document.getElementById('menuToggle');
   if (!hamburger) {
     console.warn('Hamburger button not found in HTML. Expected id="hamburger-btn"');
     return;

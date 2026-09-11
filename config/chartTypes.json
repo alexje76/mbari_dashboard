@@ -13,12 +13,6 @@
       "category": "power"
     },
     {
-      "name": "power_in",
-      "label": "Power In",
-      "unit": "W",
-      "category": "power"
-    },
-    {
       "name": "power_out",
       "label": "Power Out",
       "unit": "W",

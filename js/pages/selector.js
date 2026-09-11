@@ -216,7 +216,6 @@ function renderChart(id, type, index) {
   }));
 
   initChart(id, {
-    title: { text: chartTypesConfig[type]?.label || type },
     tooltip: { trigger: 'axis' },
     legend: { data: currentControllers },
     xAxis: { type: 'category', data: times },

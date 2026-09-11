@@ -11,9 +11,17 @@ import {
   getSeaStateScatter,
   filterByDateRange,
 } from '../shared/dataFetcher.js';
-import { initChart, resizeAllCharts, getColorForController } from '../shared/chartUtils.js';
+import {
+  initChart,
+  resizeAllCharts,
+  getColorForController,
+  syncChartZoom,
+  resetChartZoom,
+} from '../shared/chartUtils.js';
 import { getURLParams, setURLParams, getDefaultDateRange, getLastNDays } from '../utils/urlParams.js';
 import { getColor } from '../shared/colorScheme.js';
+
+const SYNCED_CHART_IDS = ['chartAvgPower', 'chartEfficiency', 'chartHs', 'chartTp'];
 
 let currentData = [];
 let currentControllers = [];
@@ -73,6 +81,7 @@ async function fetchAndRenderData(startDate, endDate) {
     renderTpScatterChart();
     renderSeaStateScatterChart();
     renderControllerList();
+    syncChartZoom(SYNCED_CHART_IDS);
 
     // Update URL params
     setURLParams({
@@ -107,7 +116,6 @@ function renderAvgPowerChart() {
   }));
 
   const option = {
-    title: { text: 'Average Power (W)' },
     tooltip: { trigger: 'axis' },
     legend: { data: currentControllers },
     xAxis: {
@@ -116,7 +124,7 @@ function renderAvgPowerChart() {
     },
     yAxis: { type: 'value', name: 'Watts' },
     series: powerSeries,
-    dataZoom: [{ type: 'slider', show: true, yAxisIndex: [0] }],
+    dataZoom: [{ type: 'inside' }, { type: 'slider' }],
   };
 
   charts.avgPower = initChart('chartAvgPower', option);
@@ -141,7 +149,6 @@ function renderEfficiencyChart() {
   }));
 
   const option = {
-    title: { text: 'Efficiency (%)' },
     tooltip: { trigger: 'axis' },
     legend: { data: currentControllers },
     xAxis: {
@@ -150,7 +157,7 @@ function renderEfficiencyChart() {
     },
     yAxis: { type: 'value', name: 'Percentage' },
     series: efficiencySeries,
-    dataZoom: [{ type: 'slider', show: true }],
+    dataZoom: [{ type: 'inside' }, { type: 'slider' }],
   };
 
   charts.efficiency = initChart('chartEfficiency', option);
@@ -166,9 +173,8 @@ function renderHsScatterChart() {
   }));
 
   const option = {
-    title: { text: 'Wave Height - Hs (m)' },
     tooltip: { trigger: 'item' },
-    xAxis: { type: 'category', name: 'Time' },
+    xAxis: { type: 'category', name: 'Time', data: timeAxis },
     yAxis: { type: 'value', name: 'Hs (m)' },
     series: [
       {
@@ -185,6 +191,7 @@ function renderHsScatterChart() {
         },
       },
     ],
+    dataZoom: [{ type: 'inside' }, { type: 'slider' }],
   };
 
   charts.hsScatter = initChart('chartHs', option);
@@ -200,9 +207,8 @@ function renderTpScatterChart() {
   }));
 
   const option = {
-    title: { text: 'Wave Period - Tp (s)' },
     tooltip: { trigger: 'item' },
-    xAxis: { type: 'category', name: 'Time' },
+    xAxis: { type: 'category', name: 'Time', data: timeAxis },
     yAxis: { type: 'value', name: 'Tp (s)' },
     series: [
       {
@@ -219,6 +225,7 @@ function renderTpScatterChart() {
         },
       },
     ],
+    dataZoom: [{ type: 'inside' }, { type: 'slider' }],
   };
 
   charts.tpScatter = initChart('chartTp', option);
@@ -248,7 +255,6 @@ function renderSeaStateScatterChart() {
   });
 
   const option = {
-    title: { text: 'Sea State (Tp vs Hs)' },
     tooltip: { trigger: 'item' },
     xAxis: { type: 'value', name: 'Tp (s)' },
     yAxis: { type: 'value', name: 'Hs (m)' },
@@ -303,10 +309,12 @@ function renderControllerList() {
  * Setup date range picker with event listeners.
  */
 function setupDateRangePicker(manifest) {
-  const startInput = document.getElementById('date-start');
-  const endInput = document.getElementById('date-end');
+  const startInput = document.getElementById('startDate');
+  const endInput = document.getElementById('endDate');
+  const applyButton = document.getElementById('applyDateRange');
+  const resetButton = document.getElementById('resetDateRange');
 
-  if (!startInput || !endInput) return;
+  if (!startInput || !endInput || !applyButton || !resetButton) return;
 
   // Set current values
   const urlParams = getURLParams();
@@ -314,21 +322,36 @@ function setupDateRangePicker(manifest) {
   const startDate = urlParams.start || defaultRange.start;
   const endDate = urlParams.end || defaultRange.end;
 
-  startInput.valueAsDate = startDate;
-  endInput.valueAsDate = endDate;
+  startInput.value = toDateInputValue(startDate);
+  endInput.value = toDateInputValue(endDate);
 
   // Handle changes
-  const handleDateChange = () => {
-    const start = startInput.valueAsDate;
-    const end = endInput.valueAsDate;
-
-    if (start && end && start <= end) {
-      fetchAndRenderData(start, end);
+  const apply = () => {
+    const start = toDateInputValue(startInput.value);
+    const end = toDateInputValue(endInput.value);
+    if (!start || !end || start > end) {
+      console.warn('Invalid date range:', startInput.value, endInput.value);
+      return;
     }
+    resetChartZoom(SYNCED_CHART_IDS);
+    fetchAndRenderData(new Date(`${start}T00:00:00Z`), new Date(`${end}T23:59:59.999Z`));
   };
 
-  startInput.addEventListener('change', handleDateChange);
-  endInput.addEventListener('change', handleDateChange);
+  applyButton.addEventListener('click', apply);
+  resetButton.addEventListener('click', () => {
+    startInput.value = toDateInputValue(manifest.availableDateRange.minDate);
+    endInput.value = toDateInputValue(manifest.availableDateRange.maxDate);
+    apply();
+  });
+}
+
+/**
+ * Convert a Date or ISO string to YYYY-MM-DD for date input values.
+ * @param {Date|string} value - Date object or ISO string
+ * @returns {string} - YYYY-MM-DD
+ */
+function toDateInputValue(value) {
+  return new Date(value).toISOString().slice(0, 10);
 }
 
 /**

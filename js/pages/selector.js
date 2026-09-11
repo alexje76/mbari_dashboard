@@ -1,7 +1,4 @@
-/**
- * Selector Display page (Page 2) initialization and state management.
- * Multi-chart, multi-filter view for detailed inspection.
- */
+/** Selector Display page. */
 
 import { initNavigation } from '../shared/navigation.js';
 import {
@@ -9,376 +6,288 @@ import {
   fetchDataForDateRange,
   getUniqueControllers,
   getSeaStateScatter,
-  parseCSV,
 } from '../shared/dataFetcher.js';
-import { initChart, resizeAllCharts, getColorForController } from '../shared/chartUtils.js';
-import { getURLParams, setURLParams, getDefaultDateRange } from '../utils/urlParams.js';
+import {
+  initChart,
+  resizeAllCharts,
+  disposeChart,
+} from '../shared/chartUtils.js';
+import {
+  getURLParams,
+  setURLParams,
+  getDefaultDateRange,
+} from '../utils/urlParams.js';
 import { getColor } from '../shared/colorScheme.js';
+
+const BASE_PATH = '/mbari_dashboard';
+const chartIds = ['chart1', 'chart2', 'chart3'];
 
 let currentData = [];
 let currentControllers = [];
 let currentSeaStates = [];
 let selectedControllers = new Set();
 let selectedSeaStates = new Set();
-let chartTypes = [];
-let charts = {};
+let chartTypes = ['', '', ''];
+let chartTypesConfig = {};
 
-const chartTypesConfig = {
-  avg_power: { label: 'Avg Power', unit: 'W' },
-  efficiency: { label: 'Efficiency', unit: '%' },
-  power_in: { label: 'Power In', unit: 'W' },
-  power_out: { label: 'Power Out', unit: 'W' },
-  battery_pct: { label: 'Battery %', unit: '%' },
-  sea_state_energy: { label: 'Sea State Energy', unit: 'J/m²' },
-  hs: { label: 'Wave Height (Hs)', unit: 'm' },
-  tp: { label: 'Wave Period (Tp)', unit: 's' },
-  peaks: { label: 'Peaks', unit: 'count' },
-};
-
-/**
- * Initialize the selector display page.
- */
 async function init() {
   initNavigation();
-
   try {
     const manifest = await fetchManifest();
-    const urlParams = getURLParams();
-    const defaultRange = getDefaultDateRange(manifest);
-
-    const startDate = urlParams.start || defaultRange.start;
-    const endDate = urlParams.end || defaultRange.end;
-
-    // Fetch data
-    await fetchAndRenderData(startDate, endDate, urlParams);
-
-    // Setup event listeners
-    setupDateRangePicker(manifest, startDate, endDate);
-    setupFilterListeners();
+    await loadChartTypes();
     setupChartTypeSelectors();
 
-    window.addEventListener('resize', () => resizeAllCharts());
+    const params = getURLParams();
+    const defaults = getDefaultDateRange(manifest);
+    const start = params.start || defaults.start;
+    const end = params.end || defaults.end;
+
+    setupDateRangePicker(manifest, start, end);
+    await fetchAndRenderData(start, end, params);
+    window.addEventListener('resize', resizeAllCharts);
   } catch (error) {
-    console.error('Selector page initialization error:', error);
-    showError('Failed to load data. Please refresh the page.');
+    console.error('Selector initialization error:', error);
+    showLoading(false);
+    showError(error.message || 'Failed to load selector data.');
   }
 }
 
-/**
- * Fetch data and initialize all UI components.
- */
-async function fetchAndRenderData(startDate, endDate, urlParams = {}) {
-  try {
-    showLoadingState(true);
+async function loadChartTypes() {
+  const response = await fetch(`${BASE_PATH}/config/chartTypes.json`);
+  if (!response.ok) throw new Error(`Chart configuration failed: ${response.status}`);
+  const config = await response.json();
+  (config.chartTypes || []).forEach((item) => {
+    chartTypesConfig[item.name] = item;
+  });
+}
 
-    currentData = await fetchDataForDateRange(startDate, endDate);
+function setupChartTypeSelectors() {
+  const container = document.getElementById('chartTypeSelectors');
+  if (!container) throw new Error('Missing chart type selector container.');
+  container.innerHTML = '';
+
+  for (let i = 0; i < 3; i++) {
+    const select = document.createElement('select');
+    select.id = `chart-type-${i + 1}`;
+    select.className = 'chart-type-select';
+    select.innerHTML = '<option value="">Select chart type</option>';
+
+    Object.values(chartTypesConfig).forEach((item) => {
+      const option = new Option(item.label, item.name);
+      select.add(option);
+    });
+
+    select.value = i === 0 ? 'avg_power' : i === 1 ? 'efficiency' : '';
+    chartTypes[i] = select.value;
+    select.addEventListener('change', () => {
+      chartTypes[i] = select.value;
+      renderCharts();
+      updateURLParams();
+    });
+    container.appendChild(select);
+  }
+}
+
+async function fetchAndRenderData(start, end, params = {}) {
+  showLoading(true);
+  hideError();
+  try {
+    const rows = await fetchDataForDateRange(start, end);
+    const startTime = new Date(start).getTime();
+    const endTime = new Date(end).getTime();
+    currentData = rows.filter((row) => {
+      const time = Date.parse(row.timestamp_iso);
+      return Number.isFinite(time) && time >= startTime && time <= endTime;
+    });
+
+    if (!currentData.length) {
+      throw new Error('No data was found for the selected date range.');
+    }
+
     currentControllers = getUniqueControllers(currentData);
     currentSeaStates = getSeaStateScatter(currentData);
-
-    // Restore filter state from URL or default
     selectedControllers = new Set(
-      urlParams.controllers && urlParams.controllers.length > 0
-        ? urlParams.controllers
-        : currentControllers
+      params.controllers?.length ? params.controllers : currentControllers
     );
     selectedSeaStates = new Set(
-      urlParams.seaStates && urlParams.seaStates.length > 0
-        ? urlParams.seaStates.map((ss) => `${ss.hs},${ss.tp}`)
-        : currentSeaStates.map((ss) => `${ss.hs},${ss.tp}`)
+      params.seaStates?.length
+        ? params.seaStates.map(({ hs, tp }) => `${hs},${tp}`)
+        : currentSeaStates.map(({ hs, tp }) => `${hs},${tp}`)
     );
 
-    // Initialize UI
     renderControllerCheckboxes();
     renderSeaStateScatter();
     renderCharts();
-
-    showLoadingState(false);
+    showLoading(false);
   } catch (error) {
-    console.error('Error fetching data:', error);
-    showLoadingState(false);
-    showError('Failed to fetch data for the selected range.');
+    showLoading(false);
+    showError(error.message || 'Failed to load data for the selected range.');
+    throw error;
   }
 }
 
-/**
- * Render controller selector checkboxes.
- */
 function renderControllerCheckboxes() {
-  const container = document.getElementById('controller-selector');
-  if (!container) return;
-
+  const container = document.getElementById('controllerCheckboxes');
+  if (!container) throw new Error('Missing controller checkbox container.');
   container.innerHTML = '';
 
-  currentControllers.forEach((controller) => {
+  currentControllers.forEach((controller, index) => {
     const label = document.createElement('label');
-    label.style.cssText = `
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 0;
-      cursor: pointer;
-      font-size: 14px;
-    `;
-
+    label.className = 'controller-option';
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
-    checkbox.value = controller;
     checkbox.checked = selectedControllers.has(controller);
     checkbox.addEventListener('change', () => {
-      if (checkbox.checked) {
-        selectedControllers.add(controller);
-      } else {
-        selectedControllers.delete(controller);
-      }
-      updateCharts();
+      checkbox.checked ? selectedControllers.add(controller) : selectedControllers.delete(controller);
+      renderCharts();
       updateURLParams();
     });
-
-    const indicator = document.createElement('span');
-    indicator.textContent = '●';
-    indicator.style.color = getColor(
-      currentControllers.indexOf(controller)
-    );
-
-    label.appendChild(checkbox);
-    label.appendChild(indicator);
-    label.appendChild(document.createTextNode(controller));
+    const swatch = document.createElement('span');
+    swatch.textContent = '●';
+    swatch.style.color = getColor(index);
+    label.append(checkbox, swatch, document.createTextNode(` ${controller}`));
     container.appendChild(label);
   });
 }
 
-/**
- * Render sea state scatter selector.
- */
 function renderSeaStateScatter() {
-  const container = document.getElementById('seaStateScatter');
-  if (!container) return;
-
-  const controllerMap = Object.fromEntries(
-    currentControllers.map((c, i) => [c, i])
-  );
-
-  // Create scatter plot showing all sea states
-  const scatterData = currentSeaStates.map((ss) => ({
-    value: [parseFloat(ss.tp), parseFloat(ss.hs)],
-    key: `${ss.tp},${ss.hs}`,
-    controllers: Array.from(ss.controllers),
-  }));
-
-  const option = {
-    title: { text: 'Sea State Selection (Tp vs Hs)' },
+  const data = currentSeaStates.map((state) => {
+    const key = `${state.hs},${state.tp}`;
+    return {
+      key,
+      value: [state.tp, state.hs],
+      itemStyle: {
+        color: selectedSeaStates.has(key) ? '#333' : '#ccc',
+        opacity: selectedSeaStates.has(key) ? 1 : 0.5,
+      },
+    };
+  });
+  const chart = initChart('seaStateScatter', {
     tooltip: { trigger: 'item' },
     xAxis: { type: 'value', name: 'Tp (s)' },
     yAxis: { type: 'value', name: 'Hs (m)' },
-    series: [
-      {
-        name: 'Sea States',
-        data: scatterData.map((d) => ({
-          ...d,
-          itemStyle: {
-            color: selectedSeaStates.has(d.key) ? '#333333' : '#cccccc',
-            opacity: selectedSeaStates.has(d.key) ? 1 : 0.5,
-          },
-        })),
-        type: 'scatter',
-        symbolSize: 8,
-        itemStyle: { borderColor: '#333333', borderWidth: 1 },
-      },
-    ],
-  };
-
-  const chart = initChart('seaStateScatter', option);
-
-  // Add click handler
-  chart.on('click', (params) => {
-    if (params.data && params.data.key) {
-      if (selectedSeaStates.has(params.data.key)) {
-        selectedSeaStates.delete(params.data.key);
-      } else {
-        selectedSeaStates.add(params.data.key);
-      }
-      updateCharts();
-      updateURLParams();
-      renderSeaStateScatter(); // Re-render to update visual state
-    }
+    series: [{ type: 'scatter', symbolSize: 9, data }],
   });
-}
-
-/**
- * Setup chart type selectors (3 dropdowns).
- */
-function setupChartTypeSelectors() {
-  const typeOptions = Object.keys(chartTypesConfig);
-
-  for (let i = 1; i <= 3; i++) {
-    const selector = document.getElementById(`chart-type-${i}`);
-    if (!selector) continue;
-
-    selector.innerHTML = '<option value="">Select chart type</option>';
-    typeOptions.forEach((type) => {
-      const option = document.createElement('option');
-      option.value = type;
-      option.textContent = chartTypesConfig[type].label;
-      selector.appendChild(option);
-    });
-
-    // Set default values
-    if (i === 1) selector.value = 'avg_power';
-    if (i === 2) selector.value = 'efficiency';
-
-    selector.addEventListener('change', () => {
-      chartTypes[i - 1] = selector.value;
+  if (chart && !chart.__selectorClickBound) {
+    chart.__selectorClickBound = true;
+    chart.on('click', ({ data: point }) => {
+      if (!point?.key) return;
+      selectedSeaStates.has(point.key)
+        ? selectedSeaStates.delete(point.key)
+        : selectedSeaStates.add(point.key);
+      renderSeaStateScatter();
       renderCharts();
       updateURLParams();
     });
   }
 }
 
-/**
- * Render the three main charts.
- */
 function renderCharts() {
-  chartTypes = [
-    document.getElementById('chart-type-1')?.value || 'avg_power',
-    document.getElementById('chart-type-2')?.value || 'efficiency',
-    document.getElementById('chart-type-3')?.value || '',
-  ].filter((t) => t);
-
-  chartTypes.forEach((chartType, index) => {
-    const chartId = `chart-${index + 1}`;
-    renderChart(chartId, chartType, index);
+  chartIds.forEach((id, index) => {
+    const type = chartTypes[index];
+    if (!type) {
+      disposeChart(id);
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = '<p class="empty-chart">Select a chart type.</p>';
+      return;
+    }
+    renderChart(id, type, index);
   });
 }
 
-/**
- * Render a single chart with filtering and overlays.
- */
-function renderChart(chartId, chartType, chartIndex) {
-  const container = document.getElementById(chartId);
-  if (!container) return;
+function renderChart(id, type, index) {
+  const element = document.getElementById(id);
+  if (!element) throw new Error(`Missing chart element: ${id}`);
+  disposeChart(id);
 
-  // Filter data based on selections
-  const filteredData = currentData.filter((row) => {
-    const hasController = selectedControllers.has(row.controller);
-    const seaStateKey = `${row.tp},${row.hs}`;
-    const hasSeaState = selectedSeaStates.has(seaStateKey);
-    return hasController && hasSeaState;
-  });
-
-  // Build series
-  const timeAxis = filteredData.map((row) => row.timestamp_iso);
-  const series = currentControllers.map((controller) => ({
+  const filtered = currentData.filter((row) =>
+    selectedControllers.has(row.controller) &&
+    selectedSeaStates.has(`${row.hs},${row.tp}`)
+  );
+  const times = filtered.map((row) => row.timestamp_iso);
+  const series = currentControllers.map((controller, controllerIndex) => ({
     name: controller,
-    data: filteredData.map((row) =>
-      row.controller === controller && selectedControllers.has(controller)
-        ? parseFloat(row[chartType]) || null
-        : null
-    ),
     type: 'line',
     smooth: true,
-    color: getColor(currentControllers.indexOf(controller)),
+    connectNulls: false,
+    data: filtered.map((row) => row.controller === controller ? valueForChart(row[type]) : null),
+    itemStyle: { color: getColor(controllerIndex) },
+    lineStyle: { color: getColor(controllerIndex) },
   }));
 
-  const option = {
-    title: { text: chartTypesConfig[chartType]?.label || chartType },
+  initChart(id, {
+    title: { text: chartTypesConfig[type]?.label || type },
     tooltip: { trigger: 'axis' },
     legend: { data: currentControllers },
-    xAxis: {
-      type: 'category',
-      data: timeAxis,
-    },
-    yAxis: {
-      type: 'value',
-      name: chartTypesConfig[chartType]?.unit || '',
-    },
+    xAxis: { type: 'category', data: times },
+    yAxis: { type: 'value', name: chartTypesConfig[type]?.unit || '' },
+    dataZoom: [{ type: 'inside' }, { type: 'slider' }],
     series,
-    dataZoom: [{ type: 'slider', show: true }],
-  };
-
-  charts[chartId] = initChart(chartId, option);
+  });
+  document.getElementById(`chart${index + 1}Title`).textContent = chartTypesConfig[type]?.label || type;
 }
 
-/**
- * Update all charts with current filter state.
- */
-function updateCharts() {
-  renderCharts();
+function valueForChart(value) {
+  if (value === '' || value == null) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : value;
 }
 
-/**
- * Setup date range picker.
- */
-function setupDateRangePicker(manifest, defaultStart, defaultEnd) {
-  const startInput = document.getElementById('date-start');
-  const endInput = document.getElementById('date-end');
+function setupDateRangePicker(manifest, start, end) {
+  const startInput = document.getElementById('startDate');
+  const endInput = document.getElementById('endDate');
+  if (!startInput || !endInput) throw new Error('Missing date range inputs.');
 
-  if (!startInput || !endInput) return;
-
-  startInput.valueAsDate = defaultStart;
-  endInput.valueAsDate = defaultEnd;
-
-  const handleDateChange = () => {
-    const start = startInput.valueAsDate;
-    const end = endInput.valueAsDate;
-
-    if (start && end && start <= end) {
-      const urlParams = getURLParams();
-      fetchAndRenderData(start, end, urlParams);
+  startInput.value = toDateInputValue(start);
+  endInput.value = toDateInputValue(end);
+  const apply = () => {
+    const nextStart = new Date(`${startInput.value}T00:00:00Z`);
+    const nextEnd = new Date(`${endInput.value}T23:59:59.999Z`);
+    if (Number.isNaN(nextStart.getTime()) || Number.isNaN(nextEnd.getTime()) || nextStart > nextEnd) {
+      showError('Choose a valid date range.');
+      return;
     }
+    fetchAndRenderData(nextStart, nextEnd, getURLParams()).catch(() => {});
   };
-
-  startInput.addEventListener('change', handleDateChange);
-  endInput.addEventListener('change', handleDateChange);
-}
-
-/**
- * Setup filter event listeners.
- */
-function setupFilterListeners() {
-  // Listeners are set up in renderControllerCheckboxes and setupChartTypeSelectors
-}
-
-/**
- * Update URL params with current state.
- */
-function updateURLParams() {
-  const startInput = document.getElementById('date-start');
-  const endInput = document.getElementById('date-end');
-
-  setURLParams({
-    start: startInput?.valueAsDate,
-    end: endInput?.valueAsDate,
-    controllers: Array.from(selectedControllers),
-    seaStates: Array.from(selectedSeaStates).map((key) => {
-      const [tp, hs] = key.split(',');
-      return { tp: parseFloat(tp), hs: parseFloat(hs) };
-    }),
-    chartTypes: chartTypes.filter((t) => t),
+  document.getElementById('applyDateRange')?.addEventListener('click', apply);
+  document.getElementById('resetDateRange')?.addEventListener('click', () => {
+    startInput.value = toDateInputValue(manifest.availableDateRange.minDate);
+    endInput.value = toDateInputValue(manifest.availableDateRange.maxDate);
+    apply();
   });
 }
 
-/**
- * Show or hide loading state.
- */
-function showLoadingState(isLoading) {
-  const loader = document.getElementById('loading-indicator');
-  if (loader) {
-    loader.style.display = isLoading ? 'block' : 'none';
-  }
+function toDateInputValue(value) {
+  return new Date(value).toISOString().slice(0, 10);
 }
 
-/**
- * Show error message.
- */
+function updateURLParams() {
+  const start = document.getElementById('startDate')?.value;
+  const end = document.getElementById('endDate')?.value;
+  setURLParams({
+    start: start ? new Date(`${start}T00:00:00Z`) : null,
+    end: end ? new Date(`${end}T23:59:59.999Z`) : null,
+    controllers: [...selectedControllers],
+    seaStates: [...selectedSeaStates].map((key) => {
+      const [hs, tp] = key.split(',').map(Number);
+      return { hs, tp };
+    }),
+    chartTypes,
+  });
+}
+
+function showLoading(show) {
+  const el = document.getElementById('loadingIndicator');
+  if (el) el.hidden = !show;
+}
+function hideError() {
+  const el = document.getElementById('errorMessage');
+  if (el) { el.hidden = true; el.textContent = ''; }
+}
 function showError(message) {
-  const errorContainer = document.getElementById('error-message');
-  if (errorContainer) {
-    errorContainer.textContent = message;
-    errorContainer.style.display = 'block';
-  }
+  const el = document.getElementById('errorMessage');
+  if (el) { el.textContent = message; el.hidden = false; }
 }
 
-// Initialize on page load
 document.addEventListener('DOMContentLoaded', init);
-
 export { init };

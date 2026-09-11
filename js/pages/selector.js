@@ -195,7 +195,8 @@ function renderCharts() {
     renderChart(id, type, index);
   });
 
-  chartIds.forEach((id) => syncChartZoom(chartIds, id));
+  // Bind after all charts have been created.
+  syncChartZoom(chartIds);
 }
 
 function renderChart(id, type, index) {

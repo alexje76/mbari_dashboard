@@ -58,23 +58,29 @@ function initChart(domId, options) {
  * @param {string[]} chartIds - Array of chart DOM IDs
  * @param {string} sourceChartId - ID of the chart that triggered the zoom
  */
-function syncChartZoom(chartIds, sourceChartId) {
-  const sourceChart = chartRegistry.get(sourceChartId);
-  if (!sourceChart) return;
+function syncChartZoom(chartIds) {
+  chartIds.forEach((sourceId) => {
+    const sourceChart = chartRegistry.get(sourceId);
+    if (!sourceChart) return;
 
-  sourceChart.on('datazoom', (event) => {
-    const start = event.start;
-    const end = event.end;
+    sourceChart.off('datazoom');
+    sourceChart.on('datazoom', (event) => {
+      const zoom = event.batch?.[0] || event;
+      const start = zoom.start;
+      const end = zoom.end;
+      if (start == null || end == null) return;
 
-    chartIds.forEach((id) => {
-      if (id === sourceChartId) return;
-
-      const targetChart = chartRegistry.get(id);
-      if (targetChart) {
-        targetChart.setOption({
-          dataZoom: [{ start, end }],
-        });
-      }
+      chartIds.forEach((targetId) => {
+        if (targetId === sourceId) return;
+        const targetChart = chartRegistry.get(targetId);
+        if (targetChart) {
+          targetChart.dispatchAction({
+            type: 'dataZoom',
+            start,
+            end,
+          });
+        }
+      });
     });
   });
 }

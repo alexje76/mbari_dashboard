@@ -17,13 +17,16 @@ import {
   getColorForController,
   syncChartZoom,
   resetChartZoom,
+  disposeChart,
 } from '../shared/chartUtils.js';
 import { getURLParams, setURLParams, getDefaultDateRange, getLastNDays } from '../utils/urlParams.js';
 import { getColor } from '../shared/colorScheme.js';
 
 const SYNCED_CHART_IDS = ['chartAvgPower', 'chartEfficiency', 'chartHs', 'chartTp'];
+const ALL_CHART_IDS = [...SYNCED_CHART_IDS, 'chartSeaState'];
 
 let currentData = [];
+let currentTimeAxis = [];
 let currentControllers = [];
 let currentSeaStates = [];
 let charts = {
@@ -71,10 +74,12 @@ async function fetchAndRenderData(startDate, endDate) {
 
     // Fetch data
     currentData = await fetchDataForDateRange(startDate, endDate);
+    currentTimeAxis = currentData.map((row) => row.timestamp_iso);
     currentControllers = getUniqueControllers(currentData);
     currentSeaStates = getSeaStateScatter(currentData);
 
     // Render charts
+    ALL_CHART_IDS.forEach((id) => disposeChart(id));
     renderAvgPowerChart();
     renderEfficiencyChart();
     renderHsScatterChart();
@@ -101,7 +106,6 @@ async function fetchAndRenderData(startDate, endDate) {
  * Render average power chart (large line/area chart).
  */
 function renderAvgPowerChart() {
-  const timeAxis = currentData.map((row) => row.timestamp_iso);
   const powerSeries = currentControllers.map((controller) => ({
     name: controller,
     data: currentData.map((row) =>
@@ -120,7 +124,7 @@ function renderAvgPowerChart() {
     legend: { data: currentControllers },
     xAxis: {
       type: 'category',
-      data: timeAxis,
+      data: currentTimeAxis,
     },
     yAxis: { type: 'value', name: 'Watts' },
     series: powerSeries,
@@ -134,7 +138,6 @@ function renderAvgPowerChart() {
  * Render efficiency chart (large line/area chart).
  */
 function renderEfficiencyChart() {
-  const timeAxis = currentData.map((row) => row.timestamp_iso);
   const efficiencySeries = currentControllers.map((controller) => ({
     name: controller,
     data: currentData.map((row) =>
@@ -153,7 +156,7 @@ function renderEfficiencyChart() {
     legend: { data: currentControllers },
     xAxis: {
       type: 'category',
-      data: timeAxis,
+      data: currentTimeAxis,
     },
     yAxis: { type: 'value', name: 'Percentage' },
     series: efficiencySeries,
@@ -174,7 +177,7 @@ function renderHsScatterChart() {
 
   const option = {
     tooltip: { trigger: 'item' },
-    xAxis: { type: 'category', name: 'Time', data: timeAxis },
+    xAxis: { type: 'category', name: 'Time', data: currentTimeAxis },
     yAxis: { type: 'value', name: 'Hs (m)' },
     series: [
       {
@@ -208,7 +211,7 @@ function renderTpScatterChart() {
 
   const option = {
     tooltip: { trigger: 'item' },
-    xAxis: { type: 'category', name: 'Time', data: timeAxis },
+    xAxis: { type: 'category', name: 'Time', data: currentTimeAxis },
     yAxis: { type: 'value', name: 'Tp (s)' },
     series: [
       {

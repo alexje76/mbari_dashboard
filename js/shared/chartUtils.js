@@ -2,7 +2,7 @@
  * Chart utilities for ECharts initialization, zoom sync, and overlays.
  */
 
-import * as echarts from 'https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js';
+const echarts = window.echarts;
 import {
   getColor,
   deselectedControllerGrey,

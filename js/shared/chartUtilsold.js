@@ -7,9 +7,11 @@ import {
   getColor,
   deselectedControllerGrey,
   deselectedSeaStatePattern,
+  gridLineGrey,
   darkGrey,
 } from './colorScheme.js';
 
+// Map to track all chart instances on a page for zoom sync
 const chartRegistry = new Map();
 const zoomRanges = new Map();
 const zoomSyncing = new Set();
@@ -18,6 +20,12 @@ function zoomGroupKey(chartIds) {
   return chartIds.join('|');
 }
 
+/**
+ * Initialize an ECharts instance with common settings.
+ * @param {string} domId - DOM element ID
+ * @param {object} options - ECharts configuration object
+ * @returns {echarts.ECharts} - Initialized chart instance
+ */
 function initChart(domId, options) {
   const dom = document.getElementById(domId);
   if (!dom) {
@@ -26,18 +34,30 @@ function initChart(domId, options) {
   }
 
   const chart = echarts.init(dom);
-  chart.setOption({
-    grid: { left: 60, right: 20, top: 30, bottom: 40 },
+
+  const mergedOptions = {
+    grid: {
+      left: 60,
+      right: 20,
+      top: 30,
+      bottom: 40,
+    },
     textStyle: {
       fontFamily: 'system-ui, -apple-system, sans-serif',
       color: darkGrey,
     },
     ...options,
-  });
+  };
+
+  chart.setOption(mergedOptions);
   chartRegistry.set(domId, chart);
   return chart;
 }
 
+/**
+ * Return a zoom range using percentages. Percentages work reliably across
+ * charts even when their category-axis values are strings or duplicated.
+ */
 function getZoomRange(event, chart) {
   const zoom = event?.batch?.[0] || event || {};
   const start = Number(zoom.start);
@@ -47,6 +67,7 @@ function getZoomRange(event, chart) {
     return { start, end };
   }
 
+  // Fallback for ECharts events that only provide startValue/endValue.
   const xAxis = chart.getOption().xAxis;
   const axisData = (Array.isArray(xAxis) ? xAxis[0] : xAxis)?.data || [];
   if (axisData.length < 2) return null;
@@ -65,6 +86,10 @@ function getZoomRange(event, chart) {
   };
 }
 
+/**
+ * Sync X-axis zoom across multiple charts.
+ * @param {string[]} chartIds - Array of chart DOM IDs
+ */
 function syncChartZoom(chartIds) {
   const groupKey = zoomGroupKey(chartIds);
 
@@ -101,6 +126,7 @@ function syncChartZoom(chartIds) {
     sourceChart.on('datazoom', handler);
   });
 
+  // Reapply the saved range after charts are recreated during filtering.
   const savedRange = zoomRanges.get(groupKey);
   if (!savedRange) return;
 
@@ -126,34 +152,26 @@ function getColorForController(controllerName, controllerMap) {
   return getColor(index);
 }
 
-/**
- * Add full-height vertical overlays for missing time sections.
- * ECharts stretches a markArea defined only by x-axis boundaries from the
- * top to the bottom of the plotting region.
- */
 function addVerticalBarOverlay(chart, ranges, controllerMap) {
-  if (!chart || !ranges?.length) return;
+  if (!ranges || ranges.length === 0) return;
 
   const option = chart.getOption();
-  const markArea = {
-    silent: true,
-    z: 0,
-    data: [],
-    itemStyle: {
-      color: '#d3d3d3',
-      opacity: 0.72,
-    },
-  };
+  const markArea = { data: [], itemStyle: { opacity: 0.5 } };
 
   ranges.forEach((range) => {
+    const color =
+      range.type === 'controller'
+        ? deselectedControllerGrey
+        : deselectedSeaStatePattern;
+
     markArea.data.push([
-      { xAxis: range.start, itemStyle: { color: '#d3d3d3' } },
+      { xAxis: range.start, itemStyle: { color } },
       { xAxis: range.end },
     ]);
   });
 
   if (!option.series) option.series = [];
-  if (!option.series.length) option.series.push({ data: [] });
+  if (option.series.length === 0) option.series.push({ data: [] });
   option.series[0].markArea = markArea;
   chart.setOption(option);
 }
@@ -161,8 +179,9 @@ function addVerticalBarOverlay(chart, ranges, controllerMap) {
 function addHorizontalAvgLine(chart, controllerName, avgValue, controllerMap) {
   const color = getColorForController(controllerName, controllerMap);
   const option = chart.getOption();
+
   if (!option.series) option.series = [];
-  if (!option.series.length) option.series.push({ data: [] });
+  if (option.series.length === 0) option.series.push({ data: [] });
   if (!option.series[0].markLine) option.series[0].markLine = { data: [] };
 
   option.series[0].markLine.data.push({
@@ -171,12 +190,13 @@ function addHorizontalAvgLine(chart, controllerName, avgValue, controllerMap) {
     lineStyle: { color, type: 'dashed' },
     label: { position: 'end', formatter: `${controllerName} avg` },
   });
+
   chart.setOption(option);
 }
 
 function clearOverlays(chart) {
   const option = chart.getOption();
-  if (option.series?.[0]) {
+  if (option.series && option.series[0]) {
     option.series[0].markArea = null;
     option.series[0].markLine = null;
   }

@@ -1,4 +1,4 @@
-2/** Selector Display page. */
+/** Selector Display page. */
 
 import { initNavigation } from '../shared/navigation.js';
 import {
@@ -13,7 +13,6 @@ import {
   disposeChart,
   syncChartZoom,
   resetChartZoom,
-  addVerticalBarOverlay,
 } from '../shared/chartUtils.js';
 import {
   getURLParams,
@@ -76,7 +75,8 @@ function setupChartTypeSelectors() {
     select.innerHTML = '<option value="">Select chart type</option>';
 
     Object.values(chartTypesConfig).forEach((item) => {
-      select.add(new Option(item.label, item.name));
+      const option = new Option(item.label, item.name);
+      select.add(option);
     });
 
     select.value = i === 0 ? 'avg_power' : i === 1 ? 'efficiency' : '';
@@ -140,9 +140,7 @@ function renderControllerCheckboxes() {
     checkbox.type = 'checkbox';
     checkbox.checked = selectedControllers.has(controller);
     checkbox.addEventListener('change', () => {
-      checkbox.checked
-        ? selectedControllers.add(controller)
-        : selectedControllers.delete(controller);
+      checkbox.checked ? selectedControllers.add(controller) : selectedControllers.delete(controller);
       renderCharts();
       updateURLParams();
     });
@@ -198,6 +196,7 @@ function renderCharts() {
     renderChart(id, type, index);
   });
 
+  // Bind after all charts have been created.
   syncChartZoom(chartIds);
 }
 
@@ -206,28 +205,22 @@ function renderChart(id, type, index) {
   if (!element) throw new Error(`Missing chart element: ${id}`);
   disposeChart(id);
 
-  // Keep all selected-sea-state rows on the x-axis. Only the series visibility
-  // changes when a controller is deselected; its time section remains visible.
-  const timelineRows = currentData.filter((row) =>
+  const filtered = currentData.filter((row) =>
+    selectedControllers.has(row.controller) &&
     selectedSeaStates.has(`${row.hs},${row.tp}`)
   );
-  const times = timelineRows.map((row) => row.timestamp_iso);
-  const missingRanges = getMissingControllerRanges(timelineRows);
-
+  const times = filtered.map((row) => row.timestamp_iso);
   const series = currentControllers.map((controller, controllerIndex) => ({
     name: controller,
     type: 'line',
-    show: selectedControllers.has(controller),
     smooth: true,
     connectNulls: false,
-    data: timelineRows.map((row) =>
-      row.controller === controller ? valueForChart(row[type]) : null
-    ),
+    data: filtered.map((row) => row.controller === controller ? valueForChart(row[type]) : null),
     itemStyle: { color: getColor(controllerIndex) },
     lineStyle: { color: getColor(controllerIndex) },
   }));
 
-  const chart = initChart(id, {
+  initChart(id, {
     tooltip: { trigger: 'axis' },
     legend: { data: currentControllers },
     xAxis: { type: 'category', data: times },
@@ -235,39 +228,7 @@ function renderChart(id, type, index) {
     dataZoom: [{ type: 'inside' }, { type: 'slider' }],
     series,
   });
-
-  if (chart) addVerticalBarOverlay(chart, missingRanges, {});
-  document.getElementById(`chart${index + 1}Title`).textContent =
-    chartTypesConfig[type]?.label || type;
-}
-
-function getMissingControllerRanges(rows) {
-  const ranges = [];
-  let start = null;
-
-  rows.forEach((row, index) => {
-    const missing = !selectedControllers.has(row.controller);
-    if (missing && start === null) start = index;
-
-    if (!missing && start !== null) {
-      ranges.push({
-        start: Math.max(0, start - 0.5),
-        end: index - 0.5,
-        type: 'controller',
-      });
-      start = null;
-    }
-  });
-
-  if (start !== null && rows.length) {
-    ranges.push({
-      start: Math.max(0, start - 0.5),
-      end: rows.length - 0.5,
-      type: 'controller',
-    });
-  }
-
-  return ranges;
+  document.getElementById(`chart${index + 1}Title`).textContent = chartTypesConfig[type]?.label || type;
 }
 
 function valueForChart(value) {
@@ -286,11 +247,7 @@ function setupDateRangePicker(manifest, start, end) {
   const apply = () => {
     const nextStart = new Date(`${startInput.value}T00:00:00Z`);
     const nextEnd = new Date(`${endInput.value}T23:59:59.999Z`);
-    if (
-      Number.isNaN(nextStart.getTime()) ||
-      Number.isNaN(nextEnd.getTime()) ||
-      nextStart > nextEnd
-    ) {
+    if (Number.isNaN(nextStart.getTime()) || Number.isNaN(nextEnd.getTime()) || nextStart > nextEnd) {
       showError('Choose a valid date range.');
       return;
     }
@@ -330,17 +287,11 @@ function showLoading(show) {
 }
 function hideError() {
   const el = document.getElementById('errorMessage');
-  if (el) {
-    el.hidden = true;
-    el.textContent = '';
-  }
+  if (el) { el.hidden = true; el.textContent = ''; }
 }
 function showError(message) {
   const el = document.getElementById('errorMessage');
-  if (el) {
-    el.textContent = message;
-    el.hidden = false;
-  }
+  if (el) { el.textContent = message; el.hidden = false; }
 }
 
 document.addEventListener('DOMContentLoaded', init);

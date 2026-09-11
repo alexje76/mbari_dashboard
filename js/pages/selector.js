@@ -1,4 +1,4 @@
-2/** Selector Display page. */
+/** Selector Display page. */
 
 import { initNavigation } from '../shared/navigation.js';
 import {
@@ -102,9 +102,7 @@ async function fetchAndRenderData(start, end, params = {}) {
       return Number.isFinite(time) && time >= startTime && time <= endTime;
     });
 
-    if (!currentData.length) {
-      throw new Error('No data was found for the selected date range.');
-    }
+    if (!currentData.length) throw new Error('No data was found for the selected date range.');
 
     currentControllers = getUniqueControllers(currentData);
     currentSeaStates = getSeaStateScatter(currentData);
@@ -140,9 +138,7 @@ function renderControllerCheckboxes() {
     checkbox.type = 'checkbox';
     checkbox.checked = selectedControllers.has(controller);
     checkbox.addEventListener('change', () => {
-      checkbox.checked
-        ? selectedControllers.add(controller)
-        : selectedControllers.delete(controller);
+      checkbox.checked ? selectedControllers.add(controller) : selectedControllers.delete(controller);
       renderCharts();
       updateURLParams();
     });
@@ -197,7 +193,6 @@ function renderCharts() {
     }
     renderChart(id, type, index);
   });
-
   syncChartZoom(chartIds);
 }
 
@@ -206,30 +201,39 @@ function renderChart(id, type, index) {
   if (!element) throw new Error(`Missing chart element: ${id}`);
   disposeChart(id);
 
-  // Keep all selected-sea-state rows on the x-axis. Only the series visibility
-  // changes when a controller is deselected; its time section remains visible.
   const timelineRows = currentData.filter((row) =>
     selectedSeaStates.has(`${row.hs},${row.tp}`)
   );
-  const times = timelineRows.map((row) => row.timestamp_iso);
-  const missingRanges = getMissingControllerRanges(timelineRows);
+  const times = [...new Set(timelineRows.map((row) => row.timestamp_iso))];
+  const activeControllers = currentControllers.filter((controller) =>
+    selectedControllers.has(controller)
+  );
 
-  const series = currentControllers.map((controller, controllerIndex) => ({
-    name: controller,
-    type: 'line',
-    show: selectedControllers.has(controller),
-    smooth: true,
-    connectNulls: false,
-    data: timelineRows.map((row) =>
-      row.controller === controller ? valueForChart(row[type]) : null
-    ),
-    itemStyle: { color: getColor(controllerIndex) },
-    lineStyle: { color: getColor(controllerIndex) },
-  }));
+  // Shade only intervals where none of the selected controllers has data.
+  const missingRanges = getMissingControllerRanges(timelineRows, times);
+
+  const series = activeControllers.map((controller) => {
+    const controllerIndex = currentControllers.indexOf(controller);
+    const valuesByTime = new Map(
+      timelineRows
+        .filter((row) => row.controller === controller)
+        .map((row) => [row.timestamp_iso, valueForChart(row[type])])
+    );
+
+    return {
+      name: controller,
+      type: 'line',
+      smooth: true,
+      connectNulls: false,
+      data: times.map((time) => valuesByTime.get(time) ?? null),
+      itemStyle: { color: getColor(controllerIndex) },
+      lineStyle: { color: getColor(controllerIndex) },
+    };
+  });
 
   const chart = initChart(id, {
     tooltip: { trigger: 'axis' },
-    legend: { data: currentControllers },
+    legend: { data: activeControllers },
     xAxis: { type: 'category', data: times },
     yAxis: { type: 'value', name: chartTypesConfig[type]?.unit || '' },
     dataZoom: [{ type: 'inside' }, { type: 'slider' }],
@@ -241,15 +245,18 @@ function renderChart(id, type, index) {
     chartTypesConfig[type]?.label || type;
 }
 
-function getMissingControllerRanges(rows) {
+function getMissingControllerRanges(rows, times) {
+  const hasSelectedData = new Set(
+    rows
+      .filter((row) => selectedControllers.has(row.controller))
+      .map((row) => row.timestamp_iso)
+  );
   const ranges = [];
   let start = null;
 
-  rows.forEach((row, index) => {
-    const missing = !selectedControllers.has(row.controller);
-    if (missing && start === null) start = index;
-
-    if (!missing && start !== null) {
+  times.forEach((time, index) => {
+    if (!hasSelectedData.has(time) && start === null) start = index;
+    if (hasSelectedData.has(time) && start !== null) {
       ranges.push({
         start: Math.max(0, start - 0.5),
         end: index - 0.5,
@@ -259,10 +266,10 @@ function getMissingControllerRanges(rows) {
     }
   });
 
-  if (start !== null && rows.length) {
+  if (start !== null && times.length) {
     ranges.push({
       start: Math.max(0, start - 0.5),
-      end: rows.length - 0.5,
+      end: times.length - 0.5,
       type: 'controller',
     });
   }
@@ -286,11 +293,7 @@ function setupDateRangePicker(manifest, start, end) {
   const apply = () => {
     const nextStart = new Date(`${startInput.value}T00:00:00Z`);
     const nextEnd = new Date(`${endInput.value}T23:59:59.999Z`);
-    if (
-      Number.isNaN(nextStart.getTime()) ||
-      Number.isNaN(nextEnd.getTime()) ||
-      nextStart > nextEnd
-    ) {
+    if (Number.isNaN(nextStart.getTime()) || Number.isNaN(nextEnd.getTime()) || nextStart > nextEnd) {
       showError('Choose a valid date range.');
       return;
     }

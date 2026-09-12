@@ -6,6 +6,7 @@ import {
   fetchDataForDateRange,
   getUniqueControllers,
   getSeaStateScatter,
+  buildSeaStateGrid,
 } from '../shared/dataFetcher.js';
 import {
   initChart,
@@ -28,6 +29,7 @@ const chartIds = ['chart1', 'chart2', 'chart3'];
 let currentData = [];
 let currentControllers = [];
 let currentSeaStates = [];
+let seaStateGrid = null;
 let selectedControllers = new Set();
 let selectedSeaStates = new Set();
 let chartTypes = ['', '', ''];
@@ -49,6 +51,7 @@ async function init() {
     const end = params.end || defaults.end;
 
     setupDateRangePicker(manifest, start, end);
+    setupToggleAllSeaStates();
     await fetchAndRenderData(start, end, params);
     window.addEventListener('resize', resizeAllCharts);
   } catch (error) {
@@ -109,6 +112,7 @@ async function fetchAndRenderData(start, end, params = {}) {
 
     currentControllers = getUniqueControllers(currentData);
     currentSeaStates = getSeaStateScatter(currentData);
+    seaStateGrid = buildSeaStateGrid(currentData);
     currentTimelineTimes = [];
     lastSeaStateWindowKey = null;
     selectedControllers = new Set(
@@ -123,6 +127,7 @@ async function fetchAndRenderData(start, end, params = {}) {
     renderControllerCheckboxes();
     renderSeaStateScatter();
     renderCharts();
+    updateToggleAllLabel();
     showLoading(false);
   } catch (error) {
     showLoading(false);
@@ -155,31 +160,66 @@ function renderControllerCheckboxes() {
   });
 }
 
-function renderSeaStateScatter(seaStates = currentSeaStates) {
+function tooltipForCell(cell) {
+  const lines = [
+    `<b>${cell.count} minute${cell.count === 1 ? '' : 's'}</b>`,
+    `Hs ${cell.hsMin.toFixed(2)}\u2013${cell.hsMax.toFixed(2)} m`,
+    `Tp ${cell.tpMin.toFixed(2)}\u2013${cell.tpMax.toFixed(2)} s`,
+  ];
+  if (cell.controllersList.length) {
+    lines.push(`Controllers: ${cell.controllersList.join(', ')}`);
+  }
+  return lines.join('<br/>');
+}
+
+function renderSeaStateScatter(visibleCellKeys = null) {
+  if (!seaStateGrid || !seaStateGrid.cells.size) return;
+  const cells = seaStateGrid.cells;
+  const showCell = (cellKey) => !visibleCellKeys || visibleCellKeys.has(cellKey);
+
   const series = currentControllers.map((controller) => {
-    const data = seaStates
-      .filter((state) => state.controllers.has(controller))
-      .map((state) => {
-        const key = `${state.hs},${state.tp}`;
-        const selected = selectedSeaStates.has(key);
-        return {
-          key,
-          value: [parseFloat(state.tp), parseFloat(state.hs)],
-          itemStyle: {
-            color: selected
-              ? getColor(currentControllers.indexOf(controller))
-              : deselectedSeaStatePattern,
-            opacity: selected ? 1 : 0.5,
-          },
-        };
+    const controllerIndex = currentControllers.indexOf(controller);
+    const data = [];
+    cells.forEach((cell, cellKey) => {
+      if (!showCell(cellKey) || !cell.controllers.has(controller)) return;
+      const selected = cell.keys.every((key) => selectedSeaStates.has(key));
+      data.push({
+        keys: cell.keys,
+        value: [cell.cx, cell.cy],
+        cell,
+        itemStyle: {
+          color: selected ? getColor(controllerIndex) : deselectedSeaStatePattern,
+          opacity: selected ? 1 : 0.5,
+        },
       });
-    return { name: controller, type: 'scatter', symbolSize: 9, data };
+    });
+    return {
+      name: controller,
+      type: 'scatter',
+      symbolSize: 9,
+      color: getColor(controllerIndex),
+      data,
+    };
   });
 
+  const config = seaStateGrid.config;
   const chart = initChart('seaStateScatter', {
-    tooltip: { trigger: 'item' },
-    xAxis: { type: 'value', name: 'Tp (s)' },
-    yAxis: { type: 'value', name: 'Hs (m)' },
+    tooltip: {
+      trigger: 'item',
+      formatter: (params) => (params?.data?.cell ? tooltipForCell(params.data.cell) : ''),
+    },
+    xAxis: {
+      type: 'value',
+      name: 'Tp (s)',
+      min: config.tpMin - config.cellW,
+      max: config.tpMax + config.cellW,
+    },
+    yAxis: {
+      type: 'value',
+      name: 'Hs (m)',
+      min: config.hsMin - config.cellH,
+      max: config.hsMax + config.cellH,
+    },
     legend: { data: currentControllers },
     series,
   });
@@ -187,11 +227,13 @@ function renderSeaStateScatter(seaStates = currentSeaStates) {
   if (chart && !chart.__selectorClickBound) {
     chart.__selectorClickBound = true;
     chart.on('click', ({ data: point }) => {
-      if (!point?.key) return;
-      selectedSeaStates.has(point.key)
-        ? selectedSeaStates.delete(point.key)
-        : selectedSeaStates.add(point.key);
-      renderCharts();
+      if (!point?.keys?.length) return;
+      const allSelected = point.keys.every((key) => selectedSeaStates.has(key));
+      point.keys.forEach((key) => {
+        if (allSelected) selectedSeaStates.delete(key);
+        else selectedSeaStates.add(key);
+      });
+      updateTimelineForSelection();
       const chartInstance =
         chartInstances.get('chart1') ||
         chartInstances.get('chart2') ||
@@ -201,13 +243,14 @@ function renderSeaStateScatter(seaStates = currentSeaStates) {
       } else {
         renderSeaStateScatter();
       }
+      updateToggleAllLabel();
       updateURLParams();
     });
   }
 }
 
 function updateSeaStateScatterForZoom(chart, force = false) {
-  if (!chart || !currentTimelineTimes.length) return;
+  if (!chart || !currentTimelineTimes.length || !seaStateGrid) return;
   const dataZoom = chart.getOption().dataZoom;
   const start = Number(dataZoom?.[0]?.start ?? 0);
   const end = Number(dataZoom?.[0]?.end ?? 100);
@@ -231,18 +274,57 @@ function updateSeaStateScatterForZoom(chart, force = false) {
   const endTime = Date.parse(currentTimelineTimes[endIndex]);
   if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) return;
 
-  const inWindow = new Set();
+  const keyToCellKey = seaStateGrid.keyToCellKey;
+  const visible = new Set();
   currentData.forEach((row) => {
     if (row.hs == null || row.tp == null) return;
     const time = Date.parse(row.timestamp_iso);
-    if (Number.isFinite(time) && time >= startTime && time <= endTime) {
-      inWindow.add(`${parseFloat(row.hs)},${parseFloat(row.tp)}`);
-    }
+    if (!Number.isFinite(time) || time < startTime || time > endTime) return;
+    const cellKey = keyToCellKey.get(`${parseFloat(row.hs)},${parseFloat(row.tp)}`);
+    if (cellKey) visible.add(cellKey);
   });
 
-  renderSeaStateScatter(
-    currentSeaStates.filter((state) => inWindow.has(`${state.hs},${state.tp}`))
-  );
+  renderSeaStateScatter(visible);
+}
+
+function allSeaStateKeys() {
+  const keys = new Set();
+  seaStateGrid?.cells?.forEach((cell) => cell.keys.forEach((key) => keys.add(key)));
+  return keys;
+}
+
+function setupToggleAllSeaStates() {
+  const button = document.getElementById('toggleAllSeaStates');
+  if (!button) return;
+  button.addEventListener('click', () => {
+    const allKeys = allSeaStateKeys();
+    if (!allKeys.size) return;
+    const allSelected = [...allKeys].every((key) => selectedSeaStates.has(key));
+    allKeys.forEach((key) => {
+      if (allSelected) selectedSeaStates.delete(key);
+      else selectedSeaStates.add(key);
+    });
+    updateTimelineForSelection();
+    const chartInstance =
+      chartInstances.get('chart1') ||
+      chartInstances.get('chart2') ||
+      chartInstances.get('chart3');
+    if (chartInstance) {
+      updateSeaStateScatterForZoom(chartInstance, true);
+    } else {
+      renderSeaStateScatter();
+    }
+    updateToggleAllLabel();
+    updateURLParams();
+  });
+}
+
+function updateToggleAllLabel() {
+  const button = document.getElementById('toggleAllSeaStates');
+  if (!button || !seaStateGrid?.cells.size) return;
+  const allKeys = allSeaStateKeys();
+  const allSelected = [...allKeys].every((key) => selectedSeaStates.has(key));
+  button.textContent = allSelected ? 'Deselect All' : 'Select All';
 }
 
 function renderCharts() {
@@ -260,11 +342,7 @@ function renderCharts() {
   syncChartZoom(chartIds);
 }
 
-function renderChart(id, type, index) {
-  const element = document.getElementById(id);
-  if (!element) throw new Error(`Missing chart element: ${id}`);
-  disposeChart(id);
-
+function buildTimelineState(type) {
   const timelineRows = currentData.filter((row) =>
     selectedSeaStates.has(`${row.hs},${row.tp}`)
   );
@@ -295,9 +373,43 @@ function renderChart(id, type, index) {
     };
   });
 
+  return { times, series, missingRanges };
+}
+
+function updateTimelineForSelection() {
+  let times = [];
+  chartIds.forEach((id, index) => {
+    const chart = chartInstances.get(id);
+    const type = chartTypes[index];
+    if (!chart || !type) return;
+    const state = buildTimelineState(type);
+    if (!times.length) times = state.times;
+    chart.setOption(
+      {
+        xAxis: {
+          type: 'category',
+          name: chartTypesConfig[type]?.unit || '',
+          data: state.times,
+        },
+        series: state.series,
+      },
+      { replaceMerge: ['xAxis', 'series'] }
+    );
+    addVerticalBarOverlay(chart, state.missingRanges, {});
+  });
+  currentTimelineTimes = times;
+}
+
+function renderChart(id, type, index) {
+  const element = document.getElementById(id);
+  if (!element) throw new Error(`Missing chart element: ${id}`);
+  disposeChart(id);
+
+  const { times, series, missingRanges } = buildTimelineState(type);
+
   const chart = initChart(id, {
     tooltip: { trigger: 'axis' },
-    legend: { data: activeControllers },
+    legend: { data: series.map((s) => s.name) },
     xAxis: { type: 'category', data: times },
     yAxis: { type: 'value', name: chartTypesConfig[type]?.unit || '' },
     dataZoom: [{ type: 'inside' }, { type: 'slider' }],

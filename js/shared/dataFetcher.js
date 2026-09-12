@@ -180,6 +180,95 @@ function getSeaStateScatter(data) {
 }
 
 /**
+ * Build a grid-aggregated view of sea state points.
+ * Nearby (Tp, Hs) combinations within `tolerance` of the observed span are
+ * combined into a single dot placed at the center of a fixed grid anchored to
+ * the observed extremes. Exact duplicates share the same key and collapse into
+ * one cell automatically; the grid never re-anchors, so aggregation cannot
+ * cascade. Selection stays at the original key granularity (see `keys`).
+ * @param {object[]} data - Array of row objects
+ * @param {number} tolerance - Cell size as a fraction of the observed span
+ * @returns {object} - { config, cells, keyToCellKey }
+ */
+function buildSeaStateGrid(data, tolerance = 0.02) {
+  const seen = new Map(); // key: "hs,tp" -> { hs, tp, controllers: Set }
+  const points = [];
+
+  data.forEach((row) => {
+    if (row.hs == null || row.tp == null) return;
+    const hs = parseFloat(row.hs);
+    const tp = parseFloat(row.tp);
+    if (!Number.isFinite(hs) || !Number.isFinite(tp)) return;
+
+    const key = `${hs},${tp}`;
+    if (!seen.has(key)) {
+      seen.set(key, { hs, tp, controllers: new Set() });
+    }
+    if (row.controller) seen.get(key).controllers.add(row.controller);
+    points.push({ hs, tp, key });
+  });
+
+  const combos = Array.from(seen.values());
+  if (!combos.length) {
+    return { config: null, cells: new Map(), keyToCellKey: new Map() };
+  }
+
+  const hsMin = Math.min(...combos.map((c) => c.hs));
+  const hsMax = Math.max(...combos.map((c) => c.hs));
+  const tpMin = Math.min(...combos.map((c) => c.tp));
+  const tpMax = Math.max(...combos.map((c) => c.tp));
+
+  const cellW = Math.max((tpMax - tpMin) * tolerance, 1e-4);
+  const cellH = Math.max((hsMax - hsMin) * tolerance, 1e-4);
+  const cols = Math.max(1, Math.ceil((tpMax - tpMin) / cellW));
+  const rows = Math.max(1, Math.ceil((hsMax - hsMin) / cellH));
+
+  const cells = new Map(); // cellKey: "col,row" -> cell
+  const keyToCellKey = new Map();
+
+  points.forEach((point) => {
+    const col = Math.min(Math.floor((point.tp - tpMin) / cellW), cols - 1);
+    const row = Math.min(Math.floor((point.hs - hsMin) / cellH), rows - 1);
+    const cellKey = `${col},${row}`;
+    keyToCellKey.set(point.key, cellKey);
+
+    let cell = cells.get(cellKey);
+    if (!cell) {
+      const tpCellMin = tpMin + col * cellW;
+      const hsCellMin = hsMin + row * cellH;
+      cell = {
+        col,
+        row,
+        cx: tpCellMin + cellW / 2,
+        cy: hsCellMin + cellH / 2,
+        hsMin: hsCellMin,
+        hsMax: hsCellMin + cellH,
+        tpMin: tpCellMin,
+        tpMax: tpCellMin + cellW,
+        keys: new Set(),
+        controllers: new Set(),
+        count: 0,
+      };
+      cells.set(cellKey, cell);
+    }
+    cell.keys.add(point.key);
+    seen.get(point.key).controllers.forEach((controller) => cell.controllers.add(controller));
+    cell.count += 1;
+  });
+
+  cells.forEach((cell) => {
+    cell.keys = Array.from(cell.keys);
+    cell.controllersList = Array.from(cell.controllers).sort();
+  });
+
+  return {
+    config: { hsMin, hsMax, tpMin, tpMax, cellW, cellH, cols, rows },
+    cells,
+    keyToCellKey,
+  };
+}
+
+/**
  * Fetch and parse all data for a date range.
  * Fetches only the day files needed for the range.
  * @param {Date} startDate - Start date
@@ -301,6 +390,7 @@ export {
   filterByDateRange,
   getUniqueControllers,
   getSeaStateScatter,
+  buildSeaStateGrid,
   fetchDataForDateRange,
   clearCache,
   downsampleToHourly,

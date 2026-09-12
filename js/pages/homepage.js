@@ -9,6 +9,7 @@ import {
   fetchDataForDateRange,
   getUniqueControllers,
   getSeaStateScatter,
+  buildSeaStateGrid,
   filterByDateRange,
 } from '../shared/dataFetcher.js';
 import {
@@ -29,6 +30,7 @@ let currentData = [];
 let currentTimeAxis = [];
 let currentControllers = [];
 let currentSeaStates = [];
+let seaStateGrid = null;
 let charts = {
   avgPower: null,
   efficiency: null,
@@ -77,6 +79,7 @@ async function fetchAndRenderData(startDate, endDate) {
     currentTimeAxis = currentData.map((row) => row.timestamp_iso);
     currentControllers = getUniqueControllers(currentData);
     currentSeaStates = getSeaStateScatter(currentData);
+    seaStateGrid = buildSeaStateGrid(currentData);
 
     // Render charts
     ALL_CHART_IDS.forEach((id) => disposeChart(id));
@@ -238,29 +241,62 @@ function renderTpScatterChart() {
  * Render sea state scatter chart (Tp vs Hs, colored by controller).
  */
 function renderSeaStateScatterChart() {
+  if (!seaStateGrid || !seaStateGrid.cells.size) return;
+
   // Group sea states by controller
   const controllerMap = Object.fromEntries(
     currentControllers.map((c, i) => [c, i])
   );
 
   const series = currentControllers.map((controller) => {
-    const seaStatesForController = currentSeaStates
-      .filter((ss) => ss.controllers.has(controller))
-      .map((ss) => [parseFloat(ss.tp), parseFloat(ss.hs)]);
+    const data = [];
+    seaStateGrid.cells.forEach((cell) => {
+      if (!cell.controllers.has(controller)) return;
+      data.push({
+        value: [cell.cx, cell.cy],
+        cell,
+      });
+    });
 
     return {
       name: controller,
-      data: seaStatesForController,
+      data,
       type: 'scatter',
       symbolSize: 6,
       color: getColor(controllerMap[controller]),
     };
   });
 
+  const config = seaStateGrid.config;
   const option = {
-    tooltip: { trigger: 'item' },
-    xAxis: { type: 'value', name: 'Tp (s)' },
-    yAxis: { type: 'value', name: 'Hs (m)' },
+    tooltip: {
+      trigger: 'item',
+      formatter: (params) => {
+        const cell = params?.data?.cell;
+        if (!cell) return '';
+        const lines = [
+          `<b>${cell.count} minute${cell.count === 1 ? '' : 's'}</b>`,
+          `Hs ${cell.hsMin.toFixed(2)}\u2013${cell.hsMax.toFixed(2)} m`,
+          `Tp ${cell.tpMin.toFixed(2)}\u2013${cell.tpMax.toFixed(2)} s`,
+        ];
+        if (cell.controllersList.length) {
+          lines.push(`Controllers: ${cell.controllersList.join(', ')}`);
+        }
+        return lines.join('<br/>');
+      },
+    },
+    xAxis: {
+      type: 'value',
+      name: 'Tp (s)',
+      min: config.tpMin - config.cellW,
+      max: config.tpMax + config.cellW,
+    },
+    yAxis: {
+      type: 'value',
+      name: 'Hs (m)',
+      min: config.hsMin - config.cellH,
+      max: config.hsMax + config.cellH,
+    },
     legend: { data: currentControllers },
     series,
   };

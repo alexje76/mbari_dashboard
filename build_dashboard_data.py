@@ -105,27 +105,28 @@ def timestamp_range(path: Path, kind: str) -> tuple[float | None, float | None]:
 def inspect_inputs(root: Path, old_state: dict, output_root: Path) -> tuple[list[dict], set[str]]:
     files: list[dict] = []
     current_paths: set[str] = set()
-    for path in sorted(root.rglob("*.csv")):
-        if output_root == path or output_root in path.parents:
+    input_dirs = [root / "controller_logs", root / "telemetry"]
+
+    for input_dir in input_dirs:
+        if not input_dir.is_dir():
             continue
-        key = str(path.resolve())
-        current_paths.add(key)
-        stat = path.stat()
-        fingerprint = {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
-        old = old_state.get("files", {}).get(key)
-        if old and old.get("fingerprint") == fingerprint:
-            info = {**old, "path": key, "changed": False}
-        else:
-            columns = set(stripped_header(path))
-            kind = classify(path, columns)
-            start, end = timestamp_range(path, kind)
-            info = {
-                "path": key, "kind": kind, "min": start, "max": end,
-                "fingerprint": fingerprint, "changed": True,
-            }
-            if kind == "additional":
-                warn(f"Unrecognized CSV skipped until its schema is added: {path}")
-        files.append(info)
+        for path in sorted(input_dir.rglob("*.csv")):
+            key = str(path.resolve())
+            current_paths.add(key)
+            stat = path.stat()
+            fingerprint = {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+            old = old_state.get("files", {}).get(key)
+            if old and old.get("fingerprint") == fingerprint:
+                info = {**old, "path": key, "changed": False}
+            else:
+                columns = set(stripped_header(path))
+                kind = classify(path, columns)
+                start, end = timestamp_range(path, kind)
+                info = {
+                    "path": key, "kind": kind, "min": start, "max": end,
+                    "fingerprint": fingerprint, "changed": True,
+                }
+            files.append(info)
     return files, current_paths
 
 

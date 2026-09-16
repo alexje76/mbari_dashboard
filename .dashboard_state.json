@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "files": {
+    "C:\\Users\\Alex Eagan\\OneDrive - UW\\Documents\\GitHub\\mbari_dashboard\\controller_logs\\controller_2026-09-16_224057_106765Z.csv": {
+      "kind": "controller",
+      "min": 1789598457.107345,
+      "max": 1789599055.9150832,
+      "fingerprint": {
+        "size": 1452,
+        "mtime_ns": 1789599205977098800
+      }
+    },
+    "C:\\Users\\Alex Eagan\\OneDrive - UW\\Documents\\GitHub\\mbari_dashboard\\telemetry\\2026.09.16T03.40.11.csv": {
+      "kind": "telemetry",
+      "min": 1789598411.711,
+      "max": 1789599048.611,
+      "fingerprint": {
+        "size": 5401862,
+        "mtime_ns": 1789599097471400000
+      }
+    }
+  }
+}

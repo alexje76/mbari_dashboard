@@ -413,20 +413,6 @@ def rebuild_overview(output_data: Path, start: float, end: float) -> None:
     write_if_changed(overview_path, csv_text(pd.concat([old, new], ignore_index=True), OVERVIEW_FIELDS))
 
 
-def copy_raw_inputs(infos: list[dict], input_root: Path, output_root: Path) -> None:
-    raw_root = output_root / "raw"
-    for info in infos:
-        src = Path(info["path"])
-        try:
-            relative = src.resolve().relative_to(input_root.resolve())
-        except ValueError:
-            relative = Path(src.name)
-        dest = raw_root / relative
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        if not dest.exists() or dest.stat().st_size != src.stat().st_size or dest.stat().st_mtime_ns != src.stat().st_mtime_ns:
-            shutil.copy2(src, dest)
-
-
 def initialize_static_files(output_root: Path) -> None:
     config = output_root / "config" / "chartTypes.json"
     if not config.exists():
@@ -459,7 +445,6 @@ def build(input_root: Path, output_root: Path) -> None:
     removed = [x for key, x in old_files.items() if key not in current_paths]
     changed += [{**x, "changed": True} for x in removed]
     initialize_static_files(output_root)
-    copy_raw_inputs(infos, input_root, output_root)
     if not changed:
         print("No input changes; dashboard files left unchanged.")
         return

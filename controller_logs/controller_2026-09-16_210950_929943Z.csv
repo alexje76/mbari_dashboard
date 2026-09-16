@@ -1,0 +1,6 @@
+timestamp_utc,wall_epoch_seconds,ros_epoch_seconds,event,controller,previous_controller
+2026-09-16T21:09:50.931206Z,1789592990.931206519,0.000000000,controller_started,free_response,
+2026-09-16T21:09:50.939847Z,1789592990.939846590,71.130000000,controller_minute,free_response,
+2026-09-16T21:10:41.777754Z,1789593041.777753473,120.000000000,controller_minute,free_response,
+2026-09-16T21:11:45.844572Z,1789593105.844571567,180.000000000,controller_minute,free_response,
+2026-09-16T21:12:43.849712Z,1789593163.849711984,234.650000000,controller_swapped,stepwise_integrated_bounded,free_response

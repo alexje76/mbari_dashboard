@@ -19,14 +19,16 @@ from typing import Iterator
 
 MINUTE_FIELDS = [
     "timestamp_ns", "timestamp_iso", "controller", "hs", "tp", "avg_power",
-    "power_out", "battery_pct", "sea_state_energy", "efficiency", "peaks",
-    "nextwave", "nextwave_error", "nextwave_error_2",
+    "power_in", "power_to_controller", "battery_voltage", "battery_pct",
+    "sea_state_energy", "efficiency", "peaks", "nextwave", "nextwave_error",
+    "nextwave_error_2",
 ]
 
 OVERVIEW_FIELDS = [
     "timestamp_ns", "timestamp_iso", "controller", "hs", "tp", "avg_power",
-    "power_out", "battery_pct", "sea_state_energy", "efficiency", "peaks_total",
-    "nextwave", "nextwave_error", "nextwave_error_2",
+    "power_in", "power_to_controller", "battery_voltage", "battery_pct",
+    "sea_state_energy", "efficiency", "peaks_total", "nextwave",
+    "nextwave_error", "nextwave_error_2",
 ]
 
 CONTROLLERS = ("free response", "controller 1", "controller 2")
@@ -36,7 +38,9 @@ CHART_TYPES_CONFIG = {
     "chartTypes": [
         {"name": "avg_power", "label": "Avg Power", "unit": "W", "category": "power"},
         {"name": "efficiency", "label": "Efficiency", "unit": "%", "category": "power"},
-        {"name": "power_out", "label": "Power Out", "unit": "W", "category": "power"},
+        {"name": "power_in", "label": "Power In", "unit": "W", "category": "power"},
+        {"name": "power_to_controller", "label": "Power to Controller", "unit": "W", "category": "power"},
+        {"name": "battery_voltage", "label": "Battery Voltage", "unit": "V", "category": "power"},
         {"name": "battery_pct", "label": "Battery %", "unit": "%", "category": "power"},
         {"name": "sea_state_energy", "label": "Sea State Energy", "unit": "J/m²", "category": "wave"},
         {"name": "hs", "label": "Wave Height (Hs)", "unit": "m", "category": "wave"},
@@ -72,6 +76,41 @@ def battery_series(rng: random.Random, total_minutes: int) -> Iterator[float]:
         else:
             battery -= rng.uniform(0.005, 0.035)
         yield round(max(0.0, min(100.0, battery)), 2)
+
+
+# Mirrors LEAD_ACID_BANK_SOC_CURVE in build_dashboard_data.py: piecewise-linear
+# open-circuit voltage -> state-of-charge curve for the 24 x 12 V lead-acid
+# bank, ~288 V nominal, ~325 V float charge. Keep both tables in sync.
+LEAD_ACID_BANK_SOC_CURVE = (
+    (288.0, 0.0),
+    (294.0, 10.0),
+    (299.0, 20.0),
+    (303.0, 30.0),
+    (306.0, 40.0),
+    (309.0, 50.0),
+    (313.0, 60.0),
+    (317.0, 70.0),
+    (321.0, 80.0),
+    (323.5, 90.0),
+    (325.0, 100.0),
+)
+
+
+def percent_to_voltage(percent: float, curve=LEAD_ACID_BANK_SOC_CURVE) -> float:
+    """Inverse of the lead-acid charge curve: emit a battery_voltage consistent
+    with the synthetic battery_pct."""
+    voltages = [point[0] for point in curve]
+    percents = [point[1] for point in curve]
+    if percent <= percents[0]:
+        return voltages[0]
+    if percent >= percents[-1]:
+        return voltages[-1]
+    for i in range(1, len(percents)):
+        if percent <= percents[i]:
+            lo_v, hi_v = voltages[i - 1], voltages[i]
+            lo_p, hi_p = percents[i - 1], percents[i]
+            return round(lo_v + (percent - lo_p) * (hi_v - lo_v) / (hi_p - lo_p), 2)
+    return voltages[-1]
 
 
 def sea_state_series(rng: random.Random, total_minutes: int) -> Iterator[tuple[float, float]]:
@@ -165,7 +204,9 @@ def generate_minute_rows(rng: random.Random, start: datetime, total_minutes: int
             "hs": hs,
             "tp": tp,
             "avg_power": avg_power,
-            "power_out": round(rng.uniform(0, 600), 2),
+            "power_in": round(max(avg_power, 0.0), 2),
+            "power_to_controller": round(abs(min(avg_power, 0.0)), 2),
+            "battery_voltage": percent_to_voltage(battery),
             "battery_pct": battery,
             "sea_state_energy": sse,
             "efficiency": calculate_efficiency(avg_power, sse),
@@ -190,7 +231,9 @@ def downsample_to_hourly(minute_rows: list[dict]) -> list[dict]:
             "controller": first["controller"],
             "hs": avg("hs", 3), "tp": avg("tp", 3),
             "avg_power": avg("avg_power", 2),
-            "power_out": avg("power_out", 2),
+            "power_in": avg("power_in", 2),
+            "power_to_controller": avg("power_to_controller", 2),
+            "battery_voltage": avg("battery_voltage", 2),
             "battery_pct": avg("battery_pct", 2),
             "sea_state_energy": avg("sea_state_energy", 2),
             "efficiency": avg("efficiency", 2),

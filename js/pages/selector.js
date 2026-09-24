@@ -15,6 +15,7 @@ import {
   syncChartZoom,
   resetChartZoom,
   addVerticalBarOverlay,
+  addHorizontalAvgLine,
 } from '../shared/chartUtils.js';
 import {
   getURLParams,
@@ -396,6 +397,7 @@ function updateTimelineForSelection() {
       { replaceMerge: ['xAxis', 'series'] }
     );
     addVerticalBarOverlay(chart, state.missingRanges, {});
+    addAvgLines(chart, type);
   });
   currentTimelineTimes = times;
 }
@@ -421,9 +423,39 @@ function renderChart(id, type, index) {
     currentTimelineTimes = times;
     chart.on('datazoom', () => updateSeaStateScatterForZoom(chart));
     addVerticalBarOverlay(chart, missingRanges, {});
+    addAvgLines(chart, type);
   }
   document.getElementById(`chart${index + 1}Title`).textContent =
     chartTypesConfig[type]?.label || type;
+}
+
+function controllerAverages(type) {
+  const averages = new Map();
+  currentControllers.forEach((controller) => {
+    if (!selectedControllers.has(controller)) return;
+    const values = currentData
+      .filter(
+        (row) =>
+          row.controller === controller &&
+          selectedSeaStates.has(`${row.hs},${row.tp}`)
+      )
+      .map((row) => valueForChart(row[type]))
+      .filter((value) => typeof value === 'number' && Number.isFinite(value));
+    if (values.length) {
+      averages.set(controller, values.reduce((a, b) => a + b, 0) / values.length);
+    }
+  });
+  return averages;
+}
+
+function addAvgLines(chart, type) {
+  if (!chart) return;
+  const controllerMap = Object.fromEntries(
+    currentControllers.map((controller, index) => [controller, index])
+  );
+  controllerAverages(type).forEach((avg, controller) => {
+    addHorizontalAvgLine(chart, controller, avg, controllerMap);
+  });
 }
 
 function getMissingControllerRanges(rows, times) {

@@ -22,18 +22,20 @@ import pandas as pd
 
 MINUTE_FIELDS = [
     "timestamp_ns", "timestamp_iso", "controller", "hs", "tp", "avg_power",
-    "power_out", "battery_pct", "sea_state_energy", "efficiency", "peaks",
-    "nextwave", "nextwave_error", "nextwave_error_2",
+    "power_in", "power_to_controller", "battery_voltage", "battery_pct",
+    "sea_state_energy", "efficiency", "peaks", "nextwave", "nextwave_error",
+    "nextwave_error_2",
 ]
 OVERVIEW_FIELDS = [
     "timestamp_ns", "timestamp_iso", "controller", "hs", "tp", "avg_power",
-    "power_out", "battery_pct", "sea_state_energy", "efficiency", "peaks_total",
-    "nextwave", "nextwave_error", "nextwave_error_2",
+    "power_in", "power_to_controller", "battery_voltage", "battery_pct",
+    "sea_state_energy", "efficiency", "peaks_total", "nextwave",
+    "nextwave_error", "nextwave_error_2",
 ]
 
 TELEMETRY_COLUMNS = {
     "Source ID", "Timestamp (epoch seconds)", "PC Bus Voltage (V)",
-    "PC Battery Curr (A)", "PC Load Dump Current (A)", "TF Batt Volt",
+    "PC Battery Curr (A)", "PC Load Dump Current (A)", "BC Voltage",
 }
 CONTROLLER_COLUMNS = {"wall_epoch_seconds", "ros_seconds", "event", "controller"}
 CONTROLLER_LABELS = {
@@ -46,7 +48,9 @@ CHART_TYPES_CONFIG = {
     "chartTypes": [
         {"name": "avg_power", "label": "Avg Power", "unit": "W", "category": "power"},
         {"name": "efficiency", "label": "Efficiency", "unit": "%", "category": "power"},
-        {"name": "power_out", "label": "Power Out", "unit": "W", "category": "power"},
+        {"name": "power_in", "label": "Power In", "unit": "W", "category": "power"},
+        {"name": "power_to_controller", "label": "Power to Controller", "unit": "W", "category": "power"},
+        {"name": "battery_voltage", "label": "Battery Voltage", "unit": "V", "category": "power"},
         {"name": "battery_pct", "label": "Battery %", "unit": "%", "category": "power"},
         {"name": "sea_state_energy", "label": "Sea State Energy", "unit": "J/m²", "category": "wave"},
         {"name": "hs", "label": "Wave Height (Hs)", "unit": "m", "category": "wave"},
@@ -201,22 +205,42 @@ def check_sample_rate(df: pd.DataFrame) -> None:
         raise ValueError(f"Telemetry is not approximately 10 Hz; median sample interval is {np.median(dt):.6g}s")
 
 
-def voltage_to_percent(voltage: float | pd.Series, v_empty: float = 42.0, v_full: float = 54.0):
-    """Swappable linear voltage-to-charge fit; replace when the charge curve arrives."""
-    return ((voltage - v_empty) / (v_full - v_empty) * 100).clip(0, 100)
+# Piecewise-linear open-circuit voltage -> state-of-charge curve for the
+# 24-battery lead-acid bank (24 x 12 V, 6 x 2 V cells each), ~288 V nominal.
+# Anchored to observed BC Voltage readings: ~290 V depleted through ~325 V
+# float charge. Swappable: replace targets below with the exact charge curve
+# when it arrives.
+LEAD_ACID_BANK_SOC_CURVE = (
+    (288.0, 0.0),
+    (294.0, 10.0),
+    (299.0, 20.0),
+    (303.0, 30.0),
+    (306.0, 40.0),
+    (309.0, 50.0),
+    (313.0, 60.0),
+    (317.0, 70.0),
+    (321.0, 80.0),
+    (323.5, 90.0),
+    (325.0, 100.0),
+)
 
 
-def linear_voltage_fit(voltage: float, slope: float, intercept: float, low: float = 0, high: float = 600) -> float:
-    """Swappable voltage-to-output fit for the future power-output calibration."""
-    return float(np.clip(slope * voltage + intercept, low, high))
+def voltage_to_percent(voltage: float | pd.Series, curve=LEAD_ACID_BANK_SOC_CURVE):
+    """Swappable voltage-to-charge lookup for the 288 V lead-acid bank.
 
-
-def power_out_from_voltage(voltage: float, timestamp_ns: int) -> float:
-    """Temporary deterministic random placeholder; replace with the voltage fit later."""
-    if not np.isfinite(voltage):
-        return np.nan
-    rng = np.random.default_rng(int(timestamp_ns) % 2**32)
-    return round(float(rng.uniform(0, 600)), 2)
+    Piecewise-linear interpolation over the lead-acid open-circuit curve.
+    Implausible readings outside the curve span (e.g. transient spikes) map to
+    NaN rather than clamping to 0/100. Replace ``curve`` to swap in the exact
+    charge curve.
+    """
+    voltages = np.asarray([point[0] for point in curve])
+    percents = np.asarray([point[1] for point in curve])
+    voltage = np.asarray(voltage)
+    return np.where(
+        (voltage < voltages[0]) | (voltage > voltages[-1]),
+        np.nan,
+        np.interp(voltage, voltages, percents),
+    )
 
 
 def load_wave_data(paths: list[Path], start: float | None = None, end: float | None = None) -> pd.DataFrame:
@@ -260,7 +284,7 @@ def build_minute_rows(raw: pd.DataFrame, events: pd.DataFrame, wave: pd.DataFram
     raw = raw.copy()
     raw["_minute"] = pd.to_datetime(raw["Timestamp (epoch seconds)"], unit="s", utc=True).dt.floor("min")
     raw["_power"] = raw["PC Bus Voltage (V)"] * (raw["PC Battery Curr (A)"] + raw["PC Load Dump Current (A)"])
-    raw["_battery_pct"] = voltage_to_percent(raw["TF Batt Volt"])
+    raw["_battery_pct"] = voltage_to_percent(raw["BC Voltage"])
     grouped = raw.groupby("_minute", sort=True)
     rows = []
     for minute, group in grouped:
@@ -271,7 +295,7 @@ def build_minute_rows(raw: pd.DataFrame, events: pd.DataFrame, wave: pd.DataFram
             continue
         ns = int(minute.value)
         avg_power = group["_power"].mean()
-        voltage = group["PC Bus Voltage (V)"].mean()
+        battery_voltage = group["BC Voltage"].mean()
         battery = group["_battery_pct"].mean()
         rows.append({
             "timestamp_ns": ns,
@@ -279,7 +303,9 @@ def build_minute_rows(raw: pd.DataFrame, events: pd.DataFrame, wave: pd.DataFram
             "controller": None,
             "hs": np.nan, "tp": np.nan,
             "avg_power": avg_power,
-            "power_out": power_out_from_voltage(voltage, ns),
+            "power_in": max(avg_power, 0.0),
+            "power_to_controller": abs(min(avg_power, 0.0)),
+            "battery_voltage": battery_voltage,
             "battery_pct": battery,
             "sea_state_energy": np.nan,
             "efficiency": np.nan,
@@ -338,7 +364,9 @@ def hourly_from_minutes(minutes: pd.DataFrame) -> pd.DataFrame:
             "timestamp_iso": hour.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "controller": combine_states(group["controller"].tolist()),
             "hs": group["hs"].mean(), "tp": group["tp"].mean(),
-            "avg_power": group["avg_power"].mean(), "power_out": group["power_out"].mean(),
+            "avg_power": group["avg_power"].mean(), "power_in": group["power_in"].mean(),
+            "power_to_controller": group["power_to_controller"].mean(),
+            "battery_voltage": group["battery_voltage"].mean(),
             "battery_pct": group["battery_pct"].mean(),
             "sea_state_energy": group["sea_state_energy"].mean(),
             "efficiency": group["efficiency"].mean(),

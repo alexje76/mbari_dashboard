@@ -330,7 +330,8 @@ function downsampleToHourly(data) {
           tp: [],
           avg_power: [],
           power_in: [],
-          power_out: [],
+          power_to_controller: [],
+          battery_voltage: [],
           battery_pct: [],
           sea_state_energy: [],
           efficiency: [],
@@ -348,7 +349,8 @@ function downsampleToHourly(data) {
       if (row.tp) hourData.tp.push(parseFloat(row.tp));
       if (row.avg_power) hourData.avg_power.push(parseFloat(row.avg_power));
       if (row.power_in) hourData.power_in.push(parseFloat(row.power_in));
-      if (row.power_out) hourData.power_out.push(parseFloat(row.power_out));
+      if (row.power_to_controller) hourData.power_to_controller.push(parseFloat(row.power_to_controller));
+      if (row.battery_voltage) hourData.battery_voltage.push(parseFloat(row.battery_voltage));
       if (row.battery_pct) hourData.battery_pct.push(parseFloat(row.battery_pct));
       if (row.sea_state_energy) hourData.sea_state_energy.push(parseFloat(row.sea_state_energy));
       if (row.efficiency) hourData.efficiency.push(parseFloat(row.efficiency));
@@ -369,7 +371,8 @@ function downsampleToHourly(data) {
     tp: hour.tp.length > 0 ? (hour.tp.reduce((a, b) => a + b, 0) / hour.tp.length).toFixed(2) : null,
     avg_power: hour.avg_power.length > 0 ? (hour.avg_power.reduce((a, b) => a + b, 0) / hour.avg_power.length).toFixed(2) : null,
     power_in: hour.power_in.length > 0 ? (hour.power_in.reduce((a, b) => a + b, 0) / hour.power_in.length).toFixed(2) : null,
-    power_out: hour.power_out.length > 0 ? (hour.power_out.reduce((a, b) => a + b, 0) / hour.power_out.length).toFixed(2) : null,
+    power_to_controller: hour.power_to_controller.length > 0 ? (hour.power_to_controller.reduce((a, b) => a + b, 0) / hour.power_to_controller.length).toFixed(2) : null,
+    battery_voltage: hour.battery_voltage.length > 0 ? (hour.battery_voltage.reduce((a, b) => a + b, 0) / hour.battery_voltage.length).toFixed(2) : null,
     battery_pct: hour.battery_pct.length > 0 ? (hour.battery_pct.reduce((a, b) => a + b, 0) / hour.battery_pct.length).toFixed(2) : null,
     sea_state_energy: hour.sea_state_energy.length > 0 ? (hour.sea_state_energy.reduce((a, b) => a + b, 0) / hour.sea_state_energy.length).toFixed(2) : null,
     efficiency: hour.efficiency.length > 0 ? (hour.efficiency.reduce((a, b) => a + b, 0) / hour.efficiency.length).toFixed(2) : null,

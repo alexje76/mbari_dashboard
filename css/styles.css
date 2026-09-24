@@ -205,6 +205,31 @@ input[type="date"] {
 }
 
 /* ============================================================================
+   Discharge Offset Slider
+   ============================================================================ */
+
+.slider-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 4px 0;
+}
+
+.slider-section label {
+    font-weight: 600;
+    color: #333333;
+}
+
+.slider-section input[type="range"] {
+    max-width: 360px;
+}
+
+.slider-hint {
+    font-size: 13px;
+    color: #666666;
+}
+
+/* ============================================================================
    Chart Containers
    ============================================================================ */
 

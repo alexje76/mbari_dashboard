@@ -30,6 +30,9 @@
 
         <!-- Main Content -->
         <main class="main-content">
+            <p id="loadingIndicator" role="status">Loading data…</p>
+            <p id="errorMessage" role="alert" hidden></p>
+
             <!-- Date Range Picker -->
             <div class="date-range-section">
                 <label>Date Range:</label>
@@ -42,10 +45,37 @@
                 </div>
             </div>
 
+            <!-- Discharge Offset Slider -->
+            <div class="chart-container">
+                <div class="slider-section">
+                    <label for="dischargeOffset">Unmeasured discharge offset: <span id="dischargeOffsetValue">15</span> W</label>
+                    <input type="range" id="dischargeOffset" min="0" max="30" step="1" value="15">
+                    <p class="slider-hint">Added to the discharge line and battery-life estimate only.</p>
+                </div>
+            </div>
+
             <!-- Battery Chart -->
             <div class="chart-container full-width-chart">
                 <h2>Battery Percentage</h2>
                 <div id="chartBattery" class="chart"></div>
+            </div>
+
+            <!-- Power In Chart -->
+            <div class="chart-container full-width-chart">
+                <h2>Power In</h2>
+                <div id="chartPowerIn" class="chart"></div>
+            </div>
+
+            <!-- Discharge Rate Chart -->
+            <div class="chart-container full-width-chart">
+                <h2>Discharge Rate</h2>
+                <div id="chartDischarge" class="chart"></div>
+            </div>
+
+            <!-- Battery Life Chart -->
+            <div class="chart-container full-width-chart">
+                <h2>Estimated Battery Life</h2>
+                <div id="chartBatteryLife" class="chart"></div>
             </div>
         </main>
     </div>

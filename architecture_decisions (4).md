@@ -31,12 +31,13 @@ A **GitHub Action** ingests raw data (source/format TBD, arrives hourly) and gen
 - `tp` — float, 1–14 (wave period, seconds).
 
 ### Power & Energy (per-minute or per-record)
-- `avg_power` — float, range -30 to 200 (watts).
-- `power_in` — float, 0–450 (input watts).
-- `power_out` — float, 0–600 (output watts).
-- `battery_pct` — float, 0–100, smooth sawtooth (discharge/charge cycles).
+- `avg_power` — float, signed battery-bus power (watts). Negative = discharging from the battery to the power controller; positive = charging.
+- `power_in` — float, = `max(avg_power, 0)` (input watts).
+- `power_to_controller` — float, magnitude of the discharging half of `avg_power` = `|min(avg_power, 0)|` (watts flowing battery → power controller). Replaces the earlier random 0–600 W `power_out` placeholder.
+- `battery_voltage` — float, volts, raw minute-mean of the battery-controller bank voltage (from `BC Voltage`). Stored so the exact charge curve can be swapped later without reprocessing telemetry.
+- `battery_pct` — float, 0–100, derived from battery voltage via a **swappable piecewise-linear voltage→SoC curve** for the 288 V lead-acid bank (24 × 12 V, 6 × 2 V cells each; operating range ~288 V depleted → ~325 V float charge). Readings outside the curve span (e.g. transient spikes) map to NaN, not clamped 0/100. Exact charge curve swaps in later.
 - `sea_state_energy` — float, J/m² (wave energy density, derived from Hs and Tp using simplified formula: E ≈ 0.5 × Hs² × Tp with random variation).
-- `efficiency` — float, 0–100 % (calculated as `(power_out / sea_state_energy) × 100`, clamped to [0, 100]).
+- `efficiency` — float, 0–100+ % (calculated as `(avg_power / sea_state_energy) × 100`, **not clamped**).
 
 ### System State
 - `peaks` — int, 1–3 (independent per-minute, or summed hourly for overview).
@@ -52,31 +53,53 @@ A **GitHub Action** ingests raw data (source/format TBD, arrives hourly) and gen
 
 ## Data Generation (Testing)
 
-### Script: `generate_telemetry.py`
-A Python script generates synthetic minute-resolution telemetry for testing. Usage:
+Two paths produce the same CSV schema and `chartTypes.json`:
+
+### Script: `SyntheticData/generate_synthetic_data.py`
+Python script for synthetic minute-resolution telemetry. Usage:
 
 ```bash
-python generate_telemetry.py \
-  --start "2026-10-05T00:00:00Z" \
+.venv\Scripts\python.exe SyntheticData\generate_synthetic_data.py \
+  --start "2026-09-05T00:00:00Z" \
   --days 60 \
   --seed 42 \
-  --output ./data_output
+  --output .
 ```
 
 **Outputs:**
-- `./data_output/data/YYYY-MM-DD.csv` — 60 daily files
-- `./data_output/data/overview.csv` — hourly downsampled
-- `./data_output/data/manifest.json` — manifest
-- `./data_output/config/chartTypes.json` — chart types config
+- `./data/YYYY-MM-DD.csv` — daily files
+- `./data/overview.csv` — hourly downsampled
+- `./data/manifest.json` — manifest
+- `./config/chartTypes.json` — chart types config
 
 **Generation Logic:**
-- **Hs & Tp:** Piecewise constant (30-min blocks) with intra-block jitter.
-- **Battery Pct:** Smooth discharge (0.005–0.035% per min) with periodic charging cycles (every 12–20 hrs, lasting 2–5 hrs).
+- **Hs & Tp:** Drifting log-space mean reversion (smooth, positively skewed sea states).
+- **Avg power:** Uniform -30 to 200 W per controller; `power_in`/`power_to_controller` are the positive/negative halves (`power_in = max(avg_power, 0)`, `power_to_controller = |min(avg_power, 0)|`).
+- **Battery Pct:** Synthetic sawtooth — smooth discharge (0.005–0.035% per min) with periodic charging cycles (every 12–20 hrs, lasting 2–5 hrs). Emits `battery_voltage` consistent with the sawtooth via `percent_to_voltage()`, the inverse of the same `LEAD_ACID_BANK_SOC_CURVE` table (duplicated in both generators; keep in sync).
 - **Sea State Energy:** `0.5 × Hs² × Tp × random(0.9, 1.1)`.
-- **Efficiency:** `(power_out / sea_state_energy) × 100`, clamped [0, 100].
+- **Efficiency:** `(avg_power / sea_state_energy) × 100`, unclamped.
 - **NextWave State:** Cycles between On/Starting/Off, stays per state 30–120 min.
 - **NextWave Errors:** Smooth variation with occasional spikes.
 - **Peaks:** Random 1–3 per minute (summed to `peaks_total` per hour in overview).
+
+### Script: `build_dashboard_data.py`
+Real ingestion pipeline (the "GitHub Action" step): reads raw telemetry CSVs (10 Hz power samples, one row per Source ID) plus controller event logs, aggregates to complete minutes, and writes the same outputs. Key mappings:
+- `avg_power` = `PC Bus Voltage × (PC Battery Curr + PC Load Dump Current)` (signed by current direction).
+- `battery_voltage` = minute mean of `BC Voltage` (Battery Controller, Source ID 0).
+- `battery_pct` = `voltage_to_percent(BC Voltage)` — piecewise-linear lead-acid curve, swappable via the `LEAD_ACID_BANK_SOC_CURVE` table at the top of the file. Values outside the curve span become NaN (sanity filter for the observed 141 V transient spikes).
+- `power_in` / `power_to_controller` split as above.
+- Wave and NextWave loaders are placeholders until their raw schemas are known.
+
+**Raw telemetry field mapping** (`TELEMETRY_COLUMNS`, Source ID → controller):
+
+| Source ID | Controller | Fields used |
+|---|---|---|
+| 0 | Battery Controller (BC) | `BC Voltage` → `battery_voltage`, `battery_pct` (from `BCRecord.voltage`, `/battery_data` — total bank voltage) |
+| 2 | Power Controller (PC) | `PC Bus Voltage (V)`, `PC Battery Curr (A)`, `PC Load Dump Current (A)` → `avg_power` |
+| 3 | XB (AHRS / GPS) | none |
+| 4 | Trefoil (TF) | none (`TF Batt Volt` ≈ 48 V is the trefoil's own instrument battery, **not** the main bank — not used) |
+
+`Timestamp (epoch seconds)` drives minute bucketing (and `Source ID` row dedup only).
 
 ---
 
@@ -173,8 +196,8 @@ python generate_telemetry.py \
 **Key Specifications:**
 - **Large graphs (Avg Power, Efficiency):** time-series line/area charts, linked X-axis zoom only (Y independent).
 - **Small graphs (Hs, Tp):** scatter plots, same X-axis linked zoom.
-- **Vertical color bars:** Full-height colored bands behind each chart indicating which controller was active during that time range.
-- **Controller list:** Shows all controllers dynamically (read from CSV); one indicator light (● for active, ◯ for inactive) per controller. Colors match vertical bars.
+- **Vertical color bars:** Full-height colored bands behind each chart indicating which controller was active during that time range. *(Not yet built.)*
+- **Controller list:** Shows all controllers dynamically (read from CSV); one indicator light (● for active, ◯ for inactive) per controller. Colors match vertical bars. *(Not yet built.)*
 - **Sea state scatter:** X=Tp, Y=Hs. All sea states default to black. Points colored by which controller was active for that sea state combination.
 - **Date range:** Defaults to "all available data" (read from `manifest.json`).
 
@@ -230,20 +253,19 @@ python generate_telemetry.py \
 - **Chart Type Selector:** Dropdown to pick 3 charts independently. Defaults: Chart 1 = Avg Power, Chart 2 = Efficiency, Chart 3 = empty ("Select chart type"). Options dynamically read from `chartTypes.json` and all numeric CSV columns.
 
 - **Sea State Selector:** 
-  - Displays scatter plot (X=Tp, Y=Hs) of ALL available sea states across full dataset history.
-  - Visual indication (● filled vs. ◯ hollow, or different color) shows which sea states exist within the currently selected time range on the main charts.
-  - User can click individual points or draw a box to toggle sea state selection (desktop). Mobile: click-toggle only.
-  - When a sea state is deselected: sections of all three charts where ONLY that sea state occurred turn hatched light-grey (different from controller solid grey), and all lines are removed. Additionally, those sea states are dropped from the sea state selector.
-  - Default: all sea states selected.
+  - Displays scatter plot (X=Tp, Y=Hs) of ALL available sea states across full dataset history. Nearby (Hs, Tp) combinations are aggregated into a fixed grid (2% of the observed span per cell); the zoomed X-axis window on the timeline charts highlights the matching cells in the scatter.
+  - Visual indication (● filled vs. ◯ hollow) shows which sea states exist within the currently selected time range on the main charts.
+  - User can click individual grid cells to toggle sea state selection; a "Select All/Deselect All" button toggles the full set. Box-draw selection is specified but *not yet built* (desktop target).
+  - When a sea state is deselected, those rows are dropped from all three charts' series. Hatched light-grey overlays over deselected-sea-state-only sections are specified but *not yet built*; deselected *controller* runs currently show as solid-grey vertical gaps instead (controller solid grey **is** built).
 
 - **Charts (3, stacked vertically):**
   - All three charts share X-axis (time); Y-axes independent.
   - Equal height (33% each).
-  - Zooming/panning one chart's X-axis triggers zoom on the other two (X only).
+  - Zooming/panning one chart's X-axis triggers zoom on the other two (X only). The zoom window also filters the sea-state scatter cells.
   - Vertical bars overlay:
-    - Deselected controller sections: solid light-grey (`#e8e8e8`), full height, all data lines removed.
-    - Deselected sea state sections: hatched light-grey (e.g., diagonal stripes), full height, all data lines removed.
-  - Horizontal lines: for each controller, a line showing average value during the selected time range (color matches controller).
+    - Deselected controller sections: solid light-grey (`#e8e8e8`), full height, all data lines removed. **(Built.)**
+    - Deselected sea state sections: hatched light-grey (e.g., diagonal stripes), full height, all data lines removed. *(Not yet built; deselected sea states are dropped from the series instead.)*
+  - Horizontal lines: for each controller, a line showing average value during the selected time range (color matches controller). **(Built — dashed colored `markLine` per controller, recomputed on controller/sea-state changes.)**
 
 - **Date Range:** Each page has independent picker. Page 2 defaults to "all available data."
 
@@ -257,23 +279,32 @@ python generate_telemetry.py \
 ┌─────────────────────────────────────────────────────┐
 │ ☰  Buoy Dashboard                                   │
 ├─────────────────────────────────────────────────────┤
-│                                                     │
-│  Large Chart: Battery %                             │
-│  [Line/area chart]                                  │
-│  [Linked X-axis zoom to other charts on this page] │
-│                                                     │
 │  Date Range Picker:                                 │
 │  [Start Date] – [End Date]                          │
 │  [Default: Past 2 Days]                             │
 │                                                     │
+│  Unmeasured discharge offset slider: [0..30 W]      │
+│  (default 15 W; affects discharge + battery-life    │
+│  series only)                                       │
+│                                                     │
+│  Chart 1: Battery %      [Line/area, per controller]│
+│  Chart 2: Power In       [max(avg_power, 0)]        │
+│  Chart 3: Discharge Rate [power_to_controller +     │
+│                            offset]                  │
+│  Chart 4: Battery Life   [5 kWh × pct ÷ net, hours; │
+│                            gap while charging]      │
+│  [All charts: linked X-axis zoom]                   │
 └─────────────────────────────────────────────────────┘
 ```
 
 **Key Specifications:**
-- Single large chart displaying `battery_pct` over time.
-- Default date range: past 2 days from current date.
-- Independent X-axis zoom (Y-axis independent if multiple charts added later).
-- No filtering or overlays.
+- Four stacked charts, all per-controller series, shared X-axis zoom (`dataZoom` synced across all four).
+- **Battery %:** `battery_pct` column (percent).
+- **Power In:** `power_in` column (positive half of `avg_power`).
+- **Discharge Rate:** `power_to_controller` column plus the unmeasured-discharge offset slider (0–30 W, default 15 W). Moving the slider updates this line and the battery-life line in place (`replaceMerge` on series only), preserving the current zoom window.
+- **Battery Life:** `hours = (BATTERY_CAPACITY_WH × battery_pct/100) ÷ net`, where `net = (power_to_controller + offset) − power_in`. `BATTERY_CAPACITY_WH = 5000` (constant, swappable); null/gap while charging (`net ≤ 0`).
+- The offset affects **only** the discharge and battery-life lines — never the battery %, power-in, or the underlying data.
+- Default date range: past 2 days from the current date. Reset button returns to "Past 2 Days".
 
 ---
 
@@ -442,7 +473,8 @@ Each page (e.g., `selector.js`) handles:
     {"name": "avg_power", "label": "Avg Power", "unit": "W", "category": "power"},
     {"name": "efficiency", "label": "Efficiency", "unit": "%", "category": "power"},
     {"name": "power_in", "label": "Power In", "unit": "W", "category": "power"},
-    {"name": "power_out", "label": "Power Out", "unit": "W", "category": "power"},
+    {"name": "power_to_controller", "label": "Power to Controller", "unit": "W", "category": "power"},
+    {"name": "battery_voltage", "label": "Battery Voltage", "unit": "V", "category": "power"},
     {"name": "battery_pct", "label": "Battery %", "unit": "%", "category": "power"},
     {"name": "sea_state_energy", "label": "Sea State Energy", "unit": "J/m²", "category": "wave"},
     {"name": "hs", "label": "Wave Height (Hs)", "unit": "m", "category": "wave"},

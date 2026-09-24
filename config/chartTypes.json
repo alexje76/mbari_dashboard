@@ -13,9 +13,21 @@
       "category": "power"
     },
     {
-      "name": "power_out",
-      "label": "Power Out",
+      "name": "power_in",
+      "label": "Power In",
       "unit": "W",
+      "category": "power"
+    },
+    {
+      "name": "power_to_controller",
+      "label": "Power to Controller",
+      "unit": "W",
+      "category": "power"
+    },
+    {
+      "name": "battery_voltage",
+      "label": "Battery Voltage",
+      "unit": "V",
       "category": "power"
     },
     {

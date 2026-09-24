@@ -41,10 +41,13 @@ const toNumber = (value) => {
 const batteryGetter = (row) => toNumber(row.battery_pct);
 const avgPowerGetter = (row) => toNumber(row.avg_power);
 const powerInGetter = (row) => toNumber(row.power_in);
-const phantomGetter = (row) => toNumber(row.power_to_controller);
+const phantomGetter = (row) => {
+  const base = toNumber(row.power_to_controller);
+  return base === null ? null : -base;
+};
 const dischargeGetter = (row) => {
   const base = toNumber(row.power_to_controller);
-  return base === null ? null : base + dischargeOffset;
+  return base === null ? null : -(base + dischargeOffset);
 };
 const lifeGetter = (row) => {
   const pct = toNumber(row.battery_pct);
@@ -166,9 +169,36 @@ function buildSeries(getter, area) {
   }));
 }
 
+/**
+ * Axis-trigger tooltip that lists only the series actually present at the
+ * hovered point. Falls back to just the x-axis timestamp when nothing is drawn
+ * there.
+ */
+function axisTooltipFormatter(unit) {
+  return (params) => {
+    const all = Array.isArray(params) ? params : [params];
+    const timestamp =
+      (all[0] && (all[0].axisValueLabel ?? all[0].axisValue ?? all[0].name)) || '';
+    const rows = all.filter((p) => {
+      const value = p.value;
+      return value !== null && value !== undefined && value !== '-';
+    });
+    if (!rows.length) return timestamp ? `<b>${timestamp}</b>` : '';
+    const lines = rows.map((p) => {
+      const value = Array.isArray(p.value) ? p.value[p.value.length - 1] : p.value;
+      const text =
+        typeof value === 'number'
+          ? (Number.isInteger(value) ? value.toFixed(0) : value.toFixed(2)) + (unit ? ` ${unit}` : '')
+          : String(value);
+      return `${p.marker || ''}${p.seriesName}: ${text}`;
+    });
+    return [timestamp ? `<b>${timestamp}</b>` : '', ...lines].filter(Boolean).join('<br/>');
+  };
+}
+
 function buildOption(unit, getter, area, extraSeries = []) {
   return {
-    tooltip: { trigger: 'axis' },
+    tooltip: { trigger: 'axis', formatter: axisTooltipFormatter(unit) },
     legend: { data: currentControllers },
     xAxis: { type: 'category', data: currentTimes },
     yAxis: { type: 'value', name: unit },
@@ -207,7 +237,7 @@ function buildPowerOption() {
     currentControllers.map((controller) => `${metric.label}: ${controller}`)
   );
   return {
-    tooltip: { trigger: 'axis' },
+    tooltip: { trigger: 'axis', formatter: axisTooltipFormatter('W') },
     legend: { type: 'scroll', data: legendData },
     xAxis: { type: 'category', data: currentTimes },
     yAxis: { type: 'value', name: 'W' },

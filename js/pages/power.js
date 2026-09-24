@@ -1,8 +1,9 @@
 /**
  * Power Usage page (Page 3) initialization and state management.
- * Battery percentage, power flow (power in / power to controller),
- * discharge rate with an unmeasured-discharge offset, and a battery-life
- * estimate.
+ * Battery percentage, a merged power chart (avg power, power in, discharge,
+ * and an offset-free phantom line), discharge rate with an unmeasured-discharge
+ * offset slider, and a battery-life estimate with per-controller expected-life
+ * projections for each controller's most recent run.
  */
 
 import { initNavigation } from '../shared/navigation.js';
@@ -23,7 +24,7 @@ import { getColor } from '../shared/colorScheme.js';
 // Swappable usable-capacity constant for the battery-life estimate.
 const BATTERY_CAPACITY_WH = 5000;
 
-const chartIds = ['chartBattery', 'chartPowerIn', 'chartDischarge', 'chartBatteryLife'];
+const chartIds = ['chartBattery', 'chartPower', 'chartBatteryLife'];
 
 let currentData = [];
 let currentControllers = [];
@@ -38,7 +39,9 @@ const toNumber = (value) => {
 };
 
 const batteryGetter = (row) => toNumber(row.battery_pct);
+const avgPowerGetter = (row) => toNumber(row.avg_power);
 const powerInGetter = (row) => toNumber(row.power_in);
+const phantomGetter = (row) => toNumber(row.power_to_controller);
 const dischargeGetter = (row) => {
   const base = toNumber(row.power_to_controller);
   return base === null ? null : base + dischargeOffset;
@@ -53,11 +56,16 @@ const lifeGetter = (row) => {
   return (BATTERY_CAPACITY_WH * (pct / 100)) / net;
 };
 
-const CHART_CONFIG = {
-  chartBattery: { getter: batteryGetter, unit: 'Percentage (%)', area: true },
-  chartPowerIn: { getter: powerInGetter, unit: 'W', area: false },
-  chartDischarge: { getter: dischargeGetter, unit: 'W', area: false },
-  chartBatteryLife: { getter: lifeGetter, unit: 'Hours', area: false },
+// Line style disambiguates the metric since color encodes the controller.
+const POWER_METRICS = [
+  { label: 'Avg Power', getter: avgPowerGetter, style: { type: 'solid', width: 2 } },
+  { label: 'Power In', getter: powerInGetter, style: { type: 'dashed', width: 2 } },
+  { label: 'Discharge', getter: dischargeGetter, style: { type: 'solid', width: 3 } },
+  { label: 'Phantom (no offset)', getter: phantomGetter, style: { type: 'dashed', width: 1.5, opacity: 0.4 } },
+];
+
+const SIMPLE_CHART_CONFIG = {
+  chartBattery: { unit: 'Percentage (%)', getter: batteryGetter, area: true },
 };
 
 /**
@@ -126,19 +134,23 @@ async function fetchAndRenderData(startDate, endDate) {
 }
 
 /**
- * Build the value series for one controller across the current time axis.
+ * Rows mapped onto the current time axis for one controller.
  */
-function seriesData(controller, getter) {
+function controllerRows(controller) {
   const rowByTime = new Map();
   currentData.forEach((row) => {
     if (row.controller === controller && !rowByTime.has(row.timestamp_iso)) {
       rowByTime.set(row.timestamp_iso, row);
     }
   });
-  return currentTimes.map((time) => {
-    const row = rowByTime.get(time);
-    return row ? getter(row) : null;
-  });
+  return currentTimes.map((time) => rowByTime.get(time) || null);
+}
+
+/**
+ * Build the value series for one controller across the current time axis.
+ */
+function seriesData(controller, getter) {
+  return controllerRows(controller).map((row) => (row ? getter(row) : null));
 }
 
 function buildSeries(getter, area) {
@@ -154,46 +166,216 @@ function buildSeries(getter, area) {
   }));
 }
 
-function buildOption(unit, getter, area) {
+function buildOption(unit, getter, area, extraSeries = []) {
   return {
     tooltip: { trigger: 'axis' },
     legend: { data: currentControllers },
     xAxis: { type: 'category', data: currentTimes },
     yAxis: { type: 'value', name: unit },
     dataZoom: [{ type: 'inside' }, { type: 'slider' }],
-    series: buildSeries(getter, area),
+    series: [...buildSeries(getter, area), ...extraSeries],
   };
+}
+
+function buildPowerSeries() {
+  const series = [];
+  POWER_METRICS.forEach((metric) => {
+    currentControllers.forEach((controller, index) => {
+      const color = getColor(index);
+      series.push({
+        name: `${metric.label}: ${controller}`,
+        type: 'line',
+        smooth: true,
+        connectNulls: false,
+        data: seriesData(controller, metric.getter),
+        itemStyle: { color },
+        lineStyle: {
+          color,
+          type: metric.style.type,
+          width: metric.style.width,
+          opacity: metric.style.opacity ?? 1,
+        },
+        emphasis: { lineStyle: { width: metric.style.width + 1 } },
+      });
+    });
+  });
+  return series;
+}
+
+function buildPowerOption() {
+  const legendData = POWER_METRICS.flatMap((metric) =>
+    currentControllers.map((controller) => `${metric.label}: ${controller}`)
+  );
+  return {
+    tooltip: { trigger: 'axis' },
+    legend: { type: 'scroll', data: legendData },
+    xAxis: { type: 'category', data: currentTimes },
+    yAxis: { type: 'value', name: 'W' },
+    dataZoom: [{ type: 'inside' }, { type: 'slider' }],
+    series: buildPowerSeries(),
+  };
+}
+
+/**
+ * Find the most recent contiguous minute-run for a controller: walk back from
+ * its last row while timestamps are exactly 1 minute apart.
+ */
+function findMostRecentRun(controller) {
+  const rows = controllerRows(controller);
+  let end = -1;
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (rows[i]) {
+      end = i;
+      break;
+    }
+  }
+  if (end === -1) return null;
+  let start = end;
+  while (
+    start > 0 &&
+    rows[start - 1] &&
+    Date.parse(currentTimes[start]) - Date.parse(currentTimes[start - 1]) === 60000
+  ) {
+    start--;
+  }
+  return { start, end };
+}
+
+/**
+ * Expected life = capacity × avg(battery_pct) ÷ avg(net) over the controller's
+ * most recent run. Null when no valid samples or net ≤ 0 (charging).
+ */
+function projectLife(controller, run) {
+  if (!run) return null;
+  let pctSum = 0;
+  let pctCount = 0;
+  let netSum = 0;
+  let netCount = 0;
+  const rows = controllerRows(controller);
+  for (let i = run.start; i <= run.end; i++) {
+    const row = rows[i];
+    const pct = batteryGetter(row);
+    if (pct !== null) {
+      pctSum += pct;
+      pctCount++;
+    }
+    const discharge = toNumber(row.power_to_controller);
+    const charge = toNumber(row.power_in);
+    if (discharge !== null && charge !== null) {
+      const net = discharge + dischargeOffset - charge;
+      if (net > 0) {
+        netSum += net;
+        netCount++;
+      }
+    }
+  }
+  if (!pctCount || !netCount) return null;
+  const avgPct = pctSum / pctCount;
+  const avgNet = netSum / netCount;
+  if (avgNet <= 0) return null;
+  return (BATTERY_CAPACITY_WH * (avgPct / 100)) / avgNet;
+}
+
+function computeLifeProjections() {
+  return currentControllers.map((controller, index) => {
+    const run = findMostRecentRun(controller);
+    const hours = projectLife(controller, run);
+    return { controller, index, run, hours };
+  });
+}
+
+/**
+ * Flat dashed overlay lines on the battery-life chart spunning each
+ * controller's most recent run at its expected life.
+ */
+function buildLifeProjectionSeries(projections) {
+  return projections
+    .filter((p) => p.hours !== null && p.run)
+    .map((p) => ({
+      name: `Expected: ${p.controller}`,
+      type: 'line',
+      symbol: 'none',
+      connectNulls: false,
+      data: currentTimes.map((_, i) =>
+        i >= p.run.start && i <= p.run.end ? p.hours : null
+      ),
+      itemStyle: { color: getColor(p.index) },
+      lineStyle: { color: getColor(p.index), type: 'dashed', width: 1.5, opacity: 0.9 },
+    }));
+}
+
+function buildBatteryLifeOption() {
+  return buildOption(
+    'Hours',
+    lifeGetter,
+    false,
+    buildLifeProjectionSeries(computeLifeProjections())
+  );
+}
+
+function buildChartOption(id) {
+  if (id === 'chartPower') return buildPowerOption();
+  if (id === 'chartBatteryLife') return buildBatteryLifeOption();
+  const config = SIMPLE_CHART_CONFIG[id];
+  return buildOption(config.unit, config.getter, config.area);
 }
 
 function renderCharts() {
   chartIds.forEach((id) => {
     disposeChart(id);
-    const config = CHART_CONFIG[id];
-    const chart = initChart(id, buildOption(config.unit, config.getter, config.area));
+    const chart = initChart(id, buildChartOption(id));
     if (chart) chartInstances.set(id, chart);
     else chartInstances.delete(id);
   });
   syncChartZoom(chartIds);
+  renderBatteryLifeSummary();
 }
 
 /**
- * Rebuild only the discharge-rate and battery-life series in place so the
- * user keeps their current zoom window when moving the offset slider.
+ * Text summary of each controller's expected battery life (most recent run).
  */
-function updateOffsetCharts() {
-  ['chartDischarge', 'chartBatteryLife'].forEach((id) => {
-    const chart = chartInstances.get(id);
-    if (!chart) return;
-    const config = CHART_CONFIG[id];
-    chart.setOption(
-      { series: buildSeries(config.getter, config.area) },
-      { replaceMerge: ['series'] }
-    );
+function renderBatteryLifeSummary() {
+  const list = document.getElementById('batteryLifeSummary');
+  if (!list) return;
+  const projections = computeLifeProjections();
+  list.replaceChildren();
+  if (!projections.length) {
+    const li = document.createElement('li');
+    li.textContent = 'No controller data in range.';
+    list.appendChild(li);
+    return;
+  }
+  projections.forEach((p) => {
+    const li = document.createElement('li');
+    const swatch = document.createElement('span');
+    swatch.className = 'summary-swatch';
+    swatch.style.backgroundColor = getColor(p.index);
+    li.appendChild(swatch);
+    const text =
+      p.hours === null
+        ? `${p.controller}: n/a (charging or missing data)`
+        : `${p.controller}: ~${p.hours.toFixed(1)} h (last run)`;
+    li.appendChild(document.createTextNode(text));
+    list.appendChild(li);
   });
 }
 
 /**
- * Setup the unmeasured-discharge offset slider (0-30 W, default 15 W).
+ * Rebuild only the power and battery-life series in place so the user keeps
+ * their current zoom window when moving the offset slider.
+ */
+function updateOffsetCharts() {
+  ['chartPower', 'chartBatteryLife'].forEach((id) => {
+    const chart = chartInstances.get(id);
+    if (!chart) return;
+    const option = buildChartOption(id);
+    chart.setOption({ ...option, series: option.series }, { replaceMerge: ['series'] });
+  });
+  renderBatteryLifeSummary();
+}
+
+/**
+ * Setup the unmeasured-discharge offset slider (0-100 W, default 15 W).
  */
 function setupDischargeSlider() {
   const slider = document.getElementById('dischargeOffset');

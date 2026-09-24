@@ -283,27 +283,34 @@ Real ingestion pipeline (the "GitHub Action" step): reads raw telemetry CSVs (10
 │  [Start Date] – [End Date]                          │
 │  [Default: Past 2 Days]                             │
 │                                                     │
-│  Unmeasured discharge offset slider: [0..30 W]      │
-│  (default 15 W; affects discharge + battery-life    │
-│  series only)                                       │
+│  Unmeasured discharge offset slider: [0..100 W]     │
+│  (default 15 W, tick at 15 = assumed average;       │
+│  affects discharge + battery-life series only)       │
 │                                                     │
-│  Chart 1: Battery %      [Line/area, per controller]│
-│  Chart 2: Power In       [max(avg_power, 0)]        │
-│  Chart 3: Discharge Rate [power_to_controller +     │
-│                            offset]                  │
-│  Chart 4: Battery Life   [5 kWh × pct ÷ net, hours; │
-│                            gap while charging]      │
+│  Chart 1: Battery %  [Line/area, per controller]     │
+│  Chart 2: Power      [merged, per controller]:       │
+│    - Avg Power (solid)                               │
+│    - Power In         [max(avg_power, 0)] (dashed)   │
+│    - Discharge        [power_to_controller + offset] │
+│                       (solid, bold)                  │
+│    - Phantom          [power_to_controller only, no  │
+│                        offset] (thin dashed, faint)  │
+│  Chart 3: Battery Life [5 kWh × pct ÷ net, hours;    │
+│            gap while charging] + dashed expected-life│
+│            span lines & text summary per controller's│
+│            most recent run                           │
 │  [All charts: linked X-axis zoom]                   │
 └─────────────────────────────────────────────────────┘
 ```
 
 **Key Specifications:**
-- Four stacked charts, all per-controller series, shared X-axis zoom (`dataZoom` synced across all four).
+- Three stacked charts, all per-controller series, shared X-axis zoom (`dataZoom` synced across all three).
 - **Battery %:** `battery_pct` column (percent).
-- **Power In:** `power_in` column (positive half of `avg_power`).
-- **Discharge Rate:** `power_to_controller` column plus the unmeasured-discharge offset slider (0–30 W, default 15 W). Moving the slider updates this line and the battery-life line in place (`replaceMerge` on series only), preserving the current zoom window.
+- **Power (merged):** per-controller lines for Avg Power (solid), Power In `power_in` (dashed), Discharge `power_to_controller + offset` (solid, bold), and Phantom `power_to_controller` (thin dashed, low opacity — shows the measured discharge without the offset). Line style (type/width/opacity) disambiguates the metric; color encodes the controller; series names are `<metric>: <controller>` so ECharts legend can toggle them.
+- **Discharge offset slider:** 0–100 W, default 15 W, tick mark at 15 W (assumed average unmeasured discharge). Moving it updates only the discharge line and the battery-life series in place (`replaceMerge` on series only), preserving the current zoom window.
 - **Battery Life:** `hours = (BATTERY_CAPACITY_WH × battery_pct/100) ÷ net`, where `net = (power_to_controller + offset) − power_in`. `BATTERY_CAPACITY_WH = 5000` (constant, swappable); null/gap while charging (`net ≤ 0`).
-- The offset affects **only** the discharge and battery-life lines — never the battery %, power-in, or the underlying data.
+- **Expected-life projections:** for each controller, its most recent contiguous minute-run is found (walking back from its last row while timestamps are exactly 1 minute apart); expected life = `BATTERY_CAPACITY_WH × avg(battery_pct) ÷ avg(net)` over that run. Drawn as flat dashed lines spanning the run's time range, plus a text summary list under the chart (n/a when charging or missing data). Recomputes on slider moves.
+- The offset affects **only** the discharge and battery-life lines — never the battery %, power-in, phantom line, or the underlying data.
 - Default date range: past 2 days from the current date. Reset button returns to "Past 2 Days".
 
 ---

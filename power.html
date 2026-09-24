@@ -49,8 +49,11 @@
             <div class="chart-container">
                 <div class="slider-section">
                     <label for="dischargeOffset">Unmeasured discharge offset: <span id="dischargeOffsetValue">15</span> W</label>
-                    <input type="range" id="dischargeOffset" min="0" max="30" step="1" value="15">
-                    <p class="slider-hint">Added to the discharge line and battery-life estimate only.</p>
+                    <input type="range" id="dischargeOffset" min="0" max="100" step="1" value="15" list="dischargeMarks">
+                    <datalist id="dischargeMarks">
+                        <option value="15" label="15 · avg"></option>
+                    </datalist>
+                    <p class="slider-hint">Added to the discharge line and battery-life estimate only. The phantom line shows measured discharge without this offset.</p>
                 </div>
             </div>
 
@@ -60,22 +63,17 @@
                 <div id="chartBattery" class="chart"></div>
             </div>
 
-            <!-- Power In Chart -->
+            <!-- Power Chart (Avg Power + Power In + Discharge + Phantom) -->
             <div class="chart-container full-width-chart">
-                <h2>Power In</h2>
-                <div id="chartPowerIn" class="chart"></div>
-            </div>
-
-            <!-- Discharge Rate Chart -->
-            <div class="chart-container full-width-chart">
-                <h2>Discharge Rate</h2>
-                <div id="chartDischarge" class="chart"></div>
+                <h2>Power</h2>
+                <div id="chartPower" class="chart"></div>
             </div>
 
             <!-- Battery Life Chart -->
             <div class="chart-container full-width-chart">
                 <h2>Estimated Battery Life</h2>
                 <div id="chartBatteryLife" class="chart"></div>
+                <ul id="batteryLifeSummary" class="battery-life-summary"></ul>
             </div>
         </main>
     </div>

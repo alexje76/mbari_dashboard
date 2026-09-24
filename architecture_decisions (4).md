@@ -257,6 +257,7 @@ Real ingestion pipeline (the "GitHub Action" step): reads raw telemetry CSVs (10
   - Visual indication (● filled vs. ◯ hollow) shows which sea states exist within the currently selected time range on the main charts.
   - User can click individual grid cells to toggle sea state selection; a "Select All/Deselect All" button toggles the full set. Box-draw selection is specified but *not yet built* (desktop target).
   - When a sea state is deselected, those rows are dropped from all three charts' series. Hatched light-grey overlays over deselected-sea-state-only sections are specified but *not yet built*; deselected *controller* runs currently show as solid-grey vertical gaps instead (controller solid grey **is** built).
+  - **No-sea-state fallback:** when a dataset has no Hs/Tp columns at all (e.g. real-pipeline output before the wave loader lands), the sea-state scatter shows an "No sea-state data in range" note with the toggle disabled, and the timeline charts use *every* row (sea-state filter bypassed). The filter re-engages as soon as any sea-state point exists.
 
 - **Charts (3, stacked vertically):**
   - All three charts share X-axis (time); Y-axes independent.

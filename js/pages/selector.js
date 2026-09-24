@@ -173,8 +173,26 @@ function tooltipForCell(cell) {
   return lines.join('<br/>');
 }
 
+/**
+ * Timeline filtering keys off sea states, which are absent from datasets with
+ * no Hs/Tp columns (e.g. the real pipeline's placeholder wave loader). Fall
+ * back to every row when no sea-state data is available, and keep using the
+ * sea-state filter the moment any exists.
+ */
+function hasUsableSeaStates() {
+  return currentSeaStates.length > 0;
+}
+
 function renderSeaStateScatter(visibleCellKeys = null) {
-  if (!seaStateGrid || !seaStateGrid.cells.size) return;
+  if (!seaStateGrid || !seaStateGrid.cells.size) {
+    const el = document.getElementById('seaStateScatter');
+    if (el) el.innerHTML = '<p class="empty-chart">No sea-state data in range.</p>';
+    const toggle = document.getElementById('toggleAllSeaStates');
+    if (toggle) toggle.disabled = true;
+    return;
+  }
+  const toggle = document.getElementById('toggleAllSeaStates');
+  if (toggle) toggle.disabled = false;
   const cells = seaStateGrid.cells;
   const showCell = (cellKey) => !visibleCellKeys || visibleCellKeys.has(cellKey);
 
@@ -345,7 +363,7 @@ function renderCharts() {
 
 function buildTimelineState(type) {
   const timelineRows = currentData.filter((row) =>
-    selectedSeaStates.has(`${row.hs},${row.tp}`)
+    hasUsableSeaStates() ? selectedSeaStates.has(`${row.hs},${row.tp}`) : true
   );
   const times = [...new Set(timelineRows.map((row) => row.timestamp_iso))];
   const activeControllers = currentControllers.filter((controller) =>
@@ -437,7 +455,7 @@ function controllerAverages(type) {
       .filter(
         (row) =>
           row.controller === controller &&
-          selectedSeaStates.has(`${row.hs},${row.tp}`)
+          (hasUsableSeaStates() ? selectedSeaStates.has(`${row.hs},${row.tp}`) : true)
       )
       .map((row) => valueForChart(row[type]))
       .filter((value) => typeof value === 'number' && Number.isFinite(value));

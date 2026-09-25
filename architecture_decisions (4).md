@@ -24,7 +24,7 @@ A **GitHub Action** ingests raw data (source/format TBD, arrives hourly) and gen
 ### Required Fields
 - `timestamp_ns` — ROS2-style nanoseconds since epoch (int64), matches `node.get_clock().now().nanoseconds`.
 - `timestamp_iso` — human-readable ISO8601 convenience column (e.g., `2026-10-05T12:34:56Z`).
-- `controller` — string enum (e.g., `free response`, `controller 1`, `controller 2`); dynamically read from CSV, not hardcoded. Persists in multi-hour blocks.
+- `controller` — string enum (real telemetry: `free_response`, `stepwise_random_bounded`, `stepwise_integrated_bounded`; synthetic: the same keys prefixed `synthetic_`); dynamically read from CSV, not hardcoded. Persists in multi-hour blocks. `build_dashboard_data.py` maps both key sets to display labels via `CONTROLLER_LABELS` (kept in sync with the synthetic generator's `CONTROLLERS` constant).
 
 ### Environmental/Wave Data (persist in ~30-min blocks)
 - `hs` — float, 0–3 (wave height, meters).
@@ -71,6 +71,7 @@ Python script for synthetic minute-resolution telemetry. Usage:
 - `./data/overview.csv` — hourly downsampled
 - `./data/manifest.json` — manifest
 - `./config/chartTypes.json` — chart types config
+- `./controller_logs/controller_logs.csv` — controller-block events (`build_dashboard_data.py` input)
 
 **Generation Logic:**
 - **Hs & Tp:** Drifting log-space mean reversion (smooth, positively skewed sea states).
@@ -81,6 +82,7 @@ Python script for synthetic minute-resolution telemetry. Usage:
 - **NextWave State:** Cycles between On/Starting/Off, stays per state 30–120 min.
 - **NextWave Errors:** Smooth variation with occasional spikes.
 - **Peaks:** Random 1–3 per minute (summed to `peaks_total` per hour in overview).
+- **Controller blocks & logs:** The per-minute `controller` sequence (30 min–24 hr blocks; controllers = real keys with a `synthetic_` prefix) is compressed into `controller_logs/controller_logs.csv` — one event at each block's start minute (`event` = `start`/`controller_switch`, `wall_epoch_seconds` = `ros_seconds` = start epoch + 60·minute-index). Emitting only block-start rows keeps the logs consistent with `data/*.csv` by construction and lets the real pipeline's `controller_by_minute` reconstruct the exact sequence when it ingests them.
 
 ### Script: `build_dashboard_data.py`
 Real ingestion pipeline (the "GitHub Action" step): reads raw telemetry CSVs (10 Hz power samples, one row per Source ID) plus controller event logs, aggregates to complete minutes, and writes the same outputs. Key mappings:

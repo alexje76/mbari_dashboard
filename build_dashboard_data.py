@@ -42,6 +42,11 @@ CONTROLLER_LABELS = {
     "free_response": "Free Response",
     "stepwise_random_bounded": "Stepwise Random Bounded",
     "stepwise_integrated_bounded": "Stepwise Integrated Bounded",
+    # Synthetic variant keys emitted by SyntheticData/generate_synthetic_data.py;
+    # keep in sync with its CONTROLLERS constant.
+    "synthetic_free_response": "Synthetic Free Response",
+    "synthetic_stepwise_random_bounded": "Synthetic Stepwise Random Bounded",
+    "synthetic_stepwise_integrated_bounded": "Synthetic Stepwise Integrated Bounded",
 }
 
 CHART_TYPES_CONFIG = {

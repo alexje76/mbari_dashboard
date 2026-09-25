@@ -6,6 +6,7 @@ Outputs:
   data/overview.csv         Hourly downsampled data
   data/manifest.json        Date-range metadata
   config/chartTypes.json    Chart catalog
+  controller_logs/controller_logs.csv  Controller-block events (build_dashboard_data.py input)
 """
 from __future__ import annotations
 
@@ -31,7 +32,18 @@ OVERVIEW_FIELDS = [
     "nextwave_error", "nextwave_error_2",
 ]
 
-CONTROLLERS = ("free response", "controller 1", "controller 2")
+# Controller keys match the internal labels in build_dashboard_data.py
+# (CONTROLLER_LABELS) but are prefixed with "synthetic_" so generated logs are
+# distinguishable from real controller activity. Keep both lists in sync.
+CONTROLLERS = (
+    "synthetic_free_response",
+    "synthetic_stepwise_random_bounded",
+    "synthetic_stepwise_integrated_bounded",
+)
+
+# Matches CONTROLLER_COLUMNS in build_dashboard_data.py so the log file is
+# classified as a controller input by the real pipeline.
+CONTROLLER_LOG_FIELDS = ["wall_epoch_seconds", "ros_seconds", "event", "controller"]
 NEXTWAVE_STATES = ("On", "Starting", "Off")
 
 CHART_TYPES_CONFIG = {
@@ -170,6 +182,33 @@ def controller_and_power_series(
         minutes_left -= 1
 
 
+def controller_log_rows(all_rows: list[dict], start: datetime) -> list[dict]:
+    """Compress the generated per-minute controller sequence into one event per
+    controller block, encoded at the block's start minute.
+
+    Emitting only block-start rows keeps the log self-consistent with the
+    per-minute `controller` values in data/*.csv: for any minute T inside a
+    block, build_dashboard_data.py's controller_by_minute selects the block's
+    start event (searchsorted side="right"). wall_epoch_seconds == ros_seconds
+    so the pipeline's ROS/wall clock-rate check passes; times are strictly
+    increasing.
+    """
+    rows = []
+    base = start.timestamp()
+    prev_controller = None
+    for i, row in enumerate(all_rows):
+        controller = row["controller"]
+        if controller != prev_controller:
+            rows.append({
+                "wall_epoch_seconds": base + 60 * i,
+                "ros_seconds": base + 60 * i,
+                "event": "start" if prev_controller is None else "controller_switch",
+                "controller": controller,
+            })
+            prev_controller = controller
+    return rows
+
+
 def nextwave_state_series(rng: random.Random, total_minutes: int) -> Iterator[tuple[str, float, float]]:
     state = rng.choice(NEXTWAVE_STATES)
     state_left = rng.randint(30, 120)
@@ -245,7 +284,7 @@ def downsample_to_hourly(minute_rows: list[dict]) -> list[dict]:
     return hourly_rows
 
 
-def generate_all_data(args) -> tuple[dict[str, list[dict]], list[dict], dict]:
+def generate_all_data(args) -> tuple[dict[str, list[dict]], list[dict], dict, list[dict]]:
     rng = random.Random(args.seed)
     total_minutes = args.days * 24 * 60
     start = datetime.fromisoformat(args.start.replace("Z", "+00:00"))
@@ -254,6 +293,7 @@ def generate_all_data(args) -> tuple[dict[str, list[dict]], list[dict], dict]:
     for row in all_rows:
         daily_data.setdefault(row["timestamp_iso"][:10], []).append(row)
     overview = downsample_to_hourly(all_rows)
+    controller_logs = controller_log_rows(all_rows, start)
     return daily_data, overview, {
         "availableDateRange": {
             "minDate": all_rows[0]["timestamp_iso"],
@@ -261,7 +301,7 @@ def generate_all_data(args) -> tuple[dict[str, list[dict]], list[dict], dict]:
         },
         "dayFiles": sorted(daily_data),
         "lastUpdated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-    }
+    }, controller_logs
 
 
 def write_csv(filepath: Path, fieldnames: list[str], rows: list[dict]):
@@ -282,17 +322,19 @@ def write_json(filepath: Path, data: dict):
 
 def main(args):
     print(f"Generating {args.days} days of synthetic telemetry (seed={args.seed})...")
-    daily_data, overview, manifest = generate_all_data(args)
+    daily_data, overview, manifest, controller_logs = generate_all_data(args)
     root = Path(args.output)
     for date, rows in sorted(daily_data.items()):
         write_csv(root / "data" / f"{date}.csv", MINUTE_FIELDS, rows)
     write_csv(root / "data" / "overview.csv", OVERVIEW_FIELDS, overview)
     write_json(root / "data" / "manifest.json", manifest)
     write_json(root / "config" / "chartTypes.json", CHART_TYPES_CONFIG)
+    write_csv(root / "controller_logs" / "controller_logs.csv", CONTROLLER_LOG_FIELDS, controller_logs)
     print("\n✓ Data generation complete!")
     print(f"  Total day files: {len(daily_data)}")
     print(f"  Total minute records: {sum(map(len, daily_data.values())):,}")
     print(f"  Total hourly records: {len(overview):,}")
+    print(f"  Total controller events: {len(controller_logs):,}")
 
 
 if __name__ == "__main__":

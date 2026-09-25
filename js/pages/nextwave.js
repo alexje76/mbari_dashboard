@@ -1,27 +1,39 @@
 /**
  * Next Wave page (Page 4) initialization and state management.
- * Experimental next-wave prediction data tracking.
+ * Experimental next-wave prediction data tracking. Renders one stacked chart
+ * per chartTypes.json "prediction" column; the NextWave State column plots on a
+ * categorical axis, error columns as numeric lines. Stacked charts share
+ * synced X-axis zoom.
  */
 
 import { initNavigation } from '../shared/navigation.js';
 import {
   fetchManifest,
   fetchDataForDateRange,
-  getUniqueControllers,
 } from '../shared/dataFetcher.js';
-import { initChart, resizeAllCharts } from '../shared/chartUtils.js';
+import {
+  initChart,
+  resizeAllCharts,
+  disposeChart,
+  syncChartZoom,
+} from '../shared/chartUtils.js';
 import { getURLParams, setURLParams, getLastNDays } from '../utils/urlParams.js';
-import { getColor } from '../shared/colorScheme.js';
 
-const NEXTWAVE_COLUMNS = [
-  { name: 'nextwave', label: 'NextWave State', unit: 'state' },
-  { name: 'nextwave_error', label: 'NextWave Error', unit: 'RMS' },
-  { name: 'nextwave_error_2', label: 'NextWave Error 2', unit: 'value' },
-];
+const BASE_PATH = '/mbari_dashboard';
 
 let currentData = [];
-let selectedCharts = new Set(['nextwave', 'nextwave_error', 'nextwave_error_2']);
-let charts = {};
+let currentTimes = [];
+let chartTypesConfig = {};
+let selectedCharts = new Set();
+let currentChartIds = [];
+let currentStartDate = null;
+let currentEndDate = null;
+
+const toNumber = (value) => {
+  if (value === '' || value == null) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+};
 
 /**
  * Initialize the next wave page.
@@ -31,230 +43,318 @@ async function init() {
 
   try {
     const manifest = await fetchManifest();
-    const urlParams = getURLParams();
+    await loadChartTypes();
+    restoreSelectedCharts();
+    setupChartSelector();
 
-    // Default to last 2 days if no URL params
+    const urlParams = getURLParams();
     const lastTwoDays = getLastNDays(2);
     const startDate = urlParams.start || lastTwoDays.start;
     const endDate = urlParams.end || lastTwoDays.end;
 
-    // Restore selected charts from URL or use defaults
-    if (urlParams.chartTypes && urlParams.chartTypes.length > 0) {
-      selectedCharts = new Set(urlParams.chartTypes);
-    }
-
-    // Fetch and render
-    await fetchAndRenderData(startDate, endDate);
-
-    // Setup event listeners
-    setupChartSelector();
     setupDateRangePicker(manifest, startDate, endDate);
+    await fetchAndRenderData(startDate, endDate);
 
     window.addEventListener('resize', () => resizeAllCharts());
   } catch (error) {
     console.error('Next Wave page initialization error:', error);
+    showLoading(false);
     showError('Failed to load data. Please refresh the page.');
   }
 }
 
 /**
- * Fetch data for date range and render charts.
+ * Load the chart-type catalog (source of the Next Wave columns).
+ */
+async function loadChartTypes() {
+  const response = await fetch(`${BASE_PATH}/config/chartTypes.json`);
+  if (!response.ok) throw new Error(`Chart configuration failed: ${response.status}`);
+  const config = await response.json();
+  (config.chartTypes || []).forEach((item) => {
+    chartTypesConfig[item.name] = item;
+  });
+}
+
+/**
+ * Restore the selected charts from the URL, defaulting to all prediction
+ * columns. Unknown names are dropped.
+ */
+function restoreSelectedCharts() {
+  const urlParams = getURLParams();
+  const predictionNames = Object.values(chartTypesConfig)
+    .filter((col) => col.category === 'prediction')
+    .map((col) => col.name);
+  if (urlParams.chartTypes && urlParams.chartTypes.length > 0) {
+    selectedCharts = new Set(
+      urlParams.chartTypes.filter((name) => predictionNames.includes(name))
+    );
+  } else {
+    selectedCharts = new Set(predictionNames);
+  }
+}
+
+/**
+ * Setup chart selector checkboxes (all prediction columns from chartTypes.json).
+ */
+function setupChartSelector() {
+  const container = document.getElementById('chartCheckboxes');
+  if (!container) return;
+
+  container.innerHTML = '';
+
+  Object.values(chartTypesConfig)
+    .filter((col) => col.category === 'prediction')
+    .forEach((col) => {
+      const label = document.createElement('label');
+      label.style.cssText = `
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 0;
+        cursor: pointer;
+        font-size: 14px;
+      `;
+
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.value = col.name;
+      checkbox.checked = selectedCharts.has(col.name);
+      checkbox.addEventListener('change', () => {
+        if (checkbox.checked) {
+          selectedCharts.add(col.name);
+        } else {
+          selectedCharts.delete(col.name);
+        }
+        renderCharts();
+        updateURLCharts();
+      });
+
+      const labelText = document.createElement('span');
+      labelText.textContent = col.label;
+
+      label.appendChild(checkbox);
+      label.appendChild(labelText);
+      container.appendChild(label);
+    });
+}
+
+/**
+ * Fetch data for a date range and render charts.
  */
 async function fetchAndRenderData(startDate, endDate) {
+  showLoading(true);
+  hideError();
   try {
-    showLoadingState(true);
-
     currentData = await fetchDataForDateRange(startDate, endDate);
 
-    // Render charts for selected columns
+    const startTime = new Date(startDate).getTime();
+    const endTime = new Date(endDate).getTime();
+    currentData = currentData.filter((row) => {
+      const time = Date.parse(row.timestamp_iso);
+      return Number.isFinite(time) && time >= startTime && time <= endTime;
+    });
+
+    if (!currentData.length) {
+      throw new Error('No data was found for the selected date range.');
+    }
+
+    currentStartDate = startDate;
+    currentEndDate = endDate;
+    currentTimes = [...new Set(currentData.map((row) => row.timestamp_iso))].sort();
+
     renderCharts();
 
-    // Update URL params
     setURLParams({
       start: startDate,
       end: endDate,
       chartTypes: Array.from(selectedCharts),
     });
 
-    showLoadingState(false);
+    showLoading(false);
   } catch (error) {
     console.error('Error fetching data:', error);
-    showLoadingState(false);
+    showLoading(false);
     showError('Failed to fetch data for the selected range.');
   }
 }
 
 /**
- * Setup chart selector checkboxes.
+ * Selected prediction columns, ordered as they appear in the config.
  */
-function setupChartSelector() {
-  const container = document.getElementById('chart-selector');
-  if (!container) return;
-
-  container.innerHTML = '';
-
-  NEXTWAVE_COLUMNS.forEach((col) => {
-    const label = document.createElement('label');
-    label.style.cssText = `
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 0;
-      cursor: pointer;
-      font-size: 14px;
-    `;
-
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.value = col.name;
-    checkbox.checked = selectedCharts.has(col.name);
-    checkbox.addEventListener('change', () => {
-      if (checkbox.checked) {
-        selectedCharts.add(col.name);
-      } else {
-        selectedCharts.delete(col.name);
-      }
-      renderCharts();
-      updateURLParams();
-    });
-
-    const labelText = document.createElement('span');
-    labelText.textContent = col.label;
-
-    label.appendChild(checkbox);
-    label.appendChild(labelText);
-    container.appendChild(label);
-  });
+function selectedColumns() {
+  return Object.values(chartTypesConfig).filter(
+    (col) => col.category === 'prediction' && selectedCharts.has(col.name)
+  );
 }
 
 /**
  * Render all selected charts stacked vertically.
  */
 function renderCharts() {
-  const selectedArray = Array.from(selectedCharts);
+  const selectedArray = selectedColumns();
+  const container = document.getElementById('chartsContainer');
+  if (!container) return;
 
-  selectedArray.forEach((chartName, index) => {
+  const allChartDivs = container.querySelectorAll('[id^="chart-"]');
+  allChartDivs.forEach((div) => {
+    const index = Number(div.id.replace('chart-', ''));
+    if (index >= selectedArray.length) {
+      disposeChart(div.id);
+      div.remove();
+    }
+  });
+
+  const activeChartIds = [];
+  selectedArray.forEach((col, index) => {
     const chartId = `chart-${index}`;
-    const container = document.getElementById(`charts-container`);
+    activeChartIds.push(chartId);
 
-    // Create or get container for this chart
     let chartDiv = document.getElementById(chartId);
     if (!chartDiv) {
       chartDiv = document.createElement('div');
       chartDiv.id = chartId;
-      chartDiv.style.cssText = `
-        width: 100%;
-        height: ${100 / selectedArray.length}%;
-        min-height: 300px;
-        margin-bottom: 16px;
-      `;
-      container?.appendChild(chartDiv);
+      chartDiv.className = 'chart';
+      chartDiv.style.cssText = 'width: 100%; height: 320px; margin-bottom: 16px;';
+      container.appendChild(chartDiv);
     }
 
-    renderChart(chartId, chartName);
+    disposeChart(chartId);
+    initChart(chartId, buildChartOption(col));
   });
 
-  // Remove charts that are no longer selected
-  const chartsContainer = document.getElementById(`charts-container`);
-  if (chartsContainer) {
-    const allChartDivs = chartsContainer.querySelectorAll('[id^="chart-"]');
-    allChartDivs.forEach((div, index) => {
-      if (index >= selectedArray.length) {
-        div.remove();
-      }
-    });
-  }
+  currentChartIds = activeChartIds;
+  syncChartZoom(currentChartIds);
 }
 
 /**
- * Render a single next-wave chart.
+ * Row for a given timestamp on the current time axis.
  */
-function renderChart(chartId, columnName) {
-  const chartConfig = NEXTWAVE_COLUMNS.find((c) => c.name === columnName);
-  if (!chartConfig) return;
-
-  const timeAxis = currentData.map((row) => row.timestamp_iso);
-
-  let series;
-
-  if (columnName === 'nextwave') {
-    // Categorical state chart
-    series = [
-      {
-        name: 'NextWave State',
-        data: currentData.map((row) => row.nextwave || ''),
-        type: 'line',
-        smooth: true,
-        color: '#7570b3',
-      },
-    ];
-  } else {
-    // Numeric chart
-    series = [
-      {
-        name: chartConfig.label,
-        data: currentData.map((row) => parseFloat(row[columnName]) || null),
-        type: 'line',
-        smooth: true,
-        color: '#d95f02',
-        areaStyle: { opacity: 0.3 },
-      },
-    ];
-  }
-
-  const option = {
-    title: { text: chartConfig.label },
-    tooltip: { trigger: 'axis' },
-    xAxis: {
-      type: 'category',
-      data: timeAxis,
-    },
-    yAxis: {
-      type: columnName === 'nextwave' ? 'category' : 'value',
-      name: chartConfig.unit,
-    },
-    series,
-    dataZoom: [{ type: 'slider', show: true }],
-  };
-
-  charts[chartId] = initChart(chartId, option);
+function rowByTime(time) {
+  return currentData.find((row) => row.timestamp_iso === time) || null;
 }
 
 /**
- * Setup date range picker.
+ * Build the option for one prediction column's chart.
+ */
+function buildChartOption(col) {
+  const categorical = col.name === 'nextwave';
+  const categories = categorical
+    ? [
+        ...new Set(
+          currentData
+            .map((row) => row[col.name])
+            .filter((value) => value !== '' && value != null)
+        ),
+      ]
+    : [];
+
+  const series = [
+    {
+      name: col.label,
+      type: 'line',
+      smooth: !categorical,
+      connectNulls: false,
+      data: currentTimes.map((time) => {
+        const row = rowByTime(time);
+        if (!row) return null;
+        if (categorical) {
+          const value = row[col.name];
+          return value === '' || value == null ? null : value;
+        }
+        return toNumber(row[col.name]);
+      }),
+      itemStyle: { color: '#d95f02' },
+      lineStyle: { color: '#d95f02' },
+      areaStyle: categorical ? undefined : { opacity: 0.3 },
+    },
+  ];
+
+  return {
+    tooltip: { trigger: 'axis', formatter: axisTooltipFormatter(col.unit) },
+    legend: { data: [col.label], top: 0, left: 10 },
+    xAxis: { type: 'category', data: currentTimes },
+    yAxis: {
+      type: categorical ? 'category' : 'value',
+      name: col.unit,
+      ...(categorical ? { data: categories } : {}),
+    },
+    dataZoom: [{ type: 'inside' }, { type: 'slider' }],
+    series,
+  };
+}
+
+/**
+ * Axis-trigger tooltip that lists only the series actually present at the
+ * hovered point. Falls back to just the x-axis timestamp when nothing is drawn
+ * there.
+ */
+function axisTooltipFormatter(unit) {
+  return (params) => {
+    const all = Array.isArray(params) ? params : [params];
+    const timestamp =
+      (all[0] && (all[0].axisValueLabel ?? all[0].axisValue ?? all[0].name)) || '';
+    const rows = all.filter((p) => {
+      const value = p.value;
+      return value !== null && value !== undefined && value !== '-';
+    });
+    if (!rows.length) return timestamp ? `<b>${timestamp}</b>` : '';
+    const lines = rows.map((p) => {
+      const value = Array.isArray(p.value) ? p.value[p.value.length - 1] : p.value;
+      const text =
+        typeof value === 'number'
+          ? (Number.isInteger(value) ? value.toFixed(0) : value.toFixed(2)) + (unit ? ` ${unit}` : '')
+          : String(value);
+      return `${p.marker || ''}${p.seriesName}: ${text}`;
+    });
+    return [timestamp ? `<b>${timestamp}</b>` : '', ...lines].filter(Boolean).join('<br/>');
+  };
+}
+
+/**
+ * Setup the date range picker.
  */
 function setupDateRangePicker(manifest, defaultStart, defaultEnd) {
-  const startInput = document.getElementById('date-start');
-  const endInput = document.getElementById('date-end');
-
+  const startInput = document.getElementById('startDate');
+  const endInput = document.getElementById('endDate');
   if (!startInput || !endInput) return;
 
-  startInput.valueAsDate = defaultStart;
-  endInput.valueAsDate = defaultEnd;
+  startInput.value = toDateInputValue(defaultStart);
+  endInput.value = toDateInputValue(defaultEnd);
 
-  const handleDateChange = () => {
-    const start = startInput.valueAsDate;
-    const end = endInput.valueAsDate;
-
-    if (start && end && start <= end) {
-      fetchAndRenderData(start, end);
+  const apply = () => {
+    const nextStart = new Date(`${startInput.value}T00:00:00Z`);
+    const nextEnd = new Date(`${endInput.value}T23:59:59.999Z`);
+    if (
+      Number.isNaN(nextStart.getTime()) ||
+      Number.isNaN(nextEnd.getTime()) ||
+      nextStart > nextEnd
+    ) {
+      showError('Choose a valid date range.');
+      return;
     }
+    fetchAndRenderData(nextStart, nextEnd);
   };
 
-  startInput.addEventListener('change', handleDateChange);
-  endInput.addEventListener('change', handleDateChange);
+  document.getElementById('applyDateRange')?.addEventListener('click', apply);
+  document.getElementById('resetDateRange')?.addEventListener('click', () => {
+    const lastTwoDays = getLastNDays(2);
+    startInput.value = toDateInputValue(lastTwoDays.start);
+    endInput.value = toDateInputValue(lastTwoDays.end);
+    apply();
+  });
+}
+
+function toDateInputValue(value) {
+  return new Date(value).toISOString().slice(0, 10);
 }
 
 /**
- * Update URL params with current state.
+ * Update only the chart-types URL param, preserving the current date range.
  */
-function updateURLParams() {
-  const startInput = document.getElementById('date-start');
-  const endInput = document.getElementById('date-end');
-
+function updateURLCharts() {
   setURLParams({
-    start: startInput?.valueAsDate,
-    end: endInput?.valueAsDate,
+    start: currentStartDate,
+    end: currentEndDate,
     chartTypes: Array.from(selectedCharts),
   });
 }
@@ -262,21 +362,27 @@ function updateURLParams() {
 /**
  * Show or hide loading state.
  */
-function showLoadingState(isLoading) {
-  const loader = document.getElementById('loading-indicator');
-  if (loader) {
-    loader.style.display = isLoading ? 'block' : 'none';
-  }
+function showLoading(show) {
+  const el = document.getElementById('loadingIndicator');
+  if (el) el.hidden = !show;
 }
 
 /**
  * Show error message.
  */
 function showError(message) {
-  const errorContainer = document.getElementById('error-message');
-  if (errorContainer) {
-    errorContainer.textContent = message;
-    errorContainer.style.display = 'block';
+  const el = document.getElementById('errorMessage');
+  if (el) {
+    el.textContent = message;
+    el.hidden = false;
+  }
+}
+
+function hideError() {
+  const el = document.getElementById('errorMessage');
+  if (el) {
+    el.hidden = true;
+    el.textContent = '';
   }
 }
 

@@ -348,9 +348,10 @@ Real ingestion pipeline (the "GitHub Action" step): reads raw telemetry CSVs (10
 ```
 
 **Key Specifications:**
-- Chart selector: checkboxes for all columns in the "Next Wave" category (`nextwave`, `nextwave_error`, `nextwave_error_2`). Future columns added to CSV are auto-included.
+- Chart selector: checkboxes for all columns in the "Next Wave" category (`nextwave`, `nextwave_error`, `nextwave_error_2`), auto-loaded from `chartTypes.json` (`category: "prediction"`) so future prediction columns added to the config appear automatically. Selection persists via the `chartTypes` URL param and defaults to all on.
 - All selected charts displayed as stacked vertical sections.
-- Shared X-axis zoom (Y-axes independent).
+- Shared X-axis zoom (Y-axes independent) — synced across the stacked charts via `syncChartZoom`.
+- The `nextwave` state column plots on a categorical y-axis; numeric prediction columns plot as value-axis lines with area fill.
 - Date range: defaults to past 2 days.
 
 ---

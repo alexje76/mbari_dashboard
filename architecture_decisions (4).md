@@ -352,6 +352,8 @@ Real ingestion pipeline (the "GitHub Action" step): reads raw telemetry CSVs (10
 - All selected charts displayed as stacked vertical sections.
 - Shared X-axis zoom (Y-axes independent) — synced across the stacked charts via `syncChartZoom`.
 - The `nextwave` state column plots on a categorical y-axis; numeric prediction columns plot as value-axis lines with area fill.
+- **Prediction Scatter (`#chartScatter`):** one `scatter` series per controller, `[x, y]` per-minute points. X-axis selectable among the numeric metrics from `chartTypes.json` (`#scatterXAxis`); Y-axis selectable among `nextwave_error`, `nextwave_error_2`, and the `nextwave` state (`#scatterYAxis`). When the state metric is on an axis it maps to three positions — `Off→1`, `Starting→2`, `On→3` (value axis, ticks labeled with the state names). Axis choices persist via `scatterX`/`scatterY` URL params; defaults `sea_state_energy` / `nextwave_error`.
+- **Controller Selector (`#scatterControllerCheckboxes`):** mirrors the selector page's checkbox+swatch pattern; unchecking a controller excludes its rows from *all* charts on the page (stacked + scatter). Selection persists via the shared `controllers` URL param and defaults to all controllers in range. A "No controller data in range." note replaces the scatter when nothing remains.
 - Date range: defaults to past 2 days.
 
 ---

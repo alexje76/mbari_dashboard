@@ -57,6 +57,30 @@
             <div id="chartsContainer" class="charts-container">
                 <!-- Charts populated by JavaScript -->
             </div>
+
+            <!-- Prediction Scatter -->
+            <div class="chart-container full-width-chart">
+                <h2>Prediction Scatter</h2>
+                <div class="filter-section">
+                    <h3>Axes</h3>
+                    <div class="chart-type-selectors">
+                        <div class="chart-type-selector">
+                            <label for="scatterXAxis">X-Axis:</label>
+                            <select id="scatterXAxis" class="chart-type-select"></select>
+                        </div>
+                        <div class="chart-type-selector">
+                            <label for="scatterYAxis">Y-Axis:</label>
+                            <select id="scatterYAxis" class="chart-type-select"></select>
+                        </div>
+                    </div>
+                </div>
+                <div class="filter-section">
+                    <h3>Controller Selector</h3>
+                    <div id="scatterControllerCheckboxes" class="checkbox-group"></div>
+                </div>
+                <p id="scatterEmpty" hidden>No controller data in range.</p>
+                <div id="chartScatter" class="chart"></div>
+            </div>
         </main>
     </div>
 

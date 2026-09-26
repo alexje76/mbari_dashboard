@@ -32,6 +32,10 @@ function getURLParams() {
     ? params.get('chartTypes').split(',')
     : [];
 
+  // Prediction-scatter axes (NextWave page)
+  result.scatterX = params.get('scatterX') || null;
+  result.scatterY = params.get('scatterY') || null;
+
   return result;
 }
 
@@ -65,6 +69,14 @@ function setURLParams(params) {
   // Chart types
   if (params.chartTypes && params.chartTypes.length > 0) {
     queryParams.set('chartTypes', params.chartTypes.join(','));
+  }
+
+  // Prediction-scatter axes (NextWave page)
+  if (params.scatterX) {
+    queryParams.set('scatterX', params.scatterX);
+  }
+  if (params.scatterY) {
+    queryParams.set('scatterY', params.scatterY);
   }
 
   const newURL = `${window.location.pathname}${queryParams.toString() ? '?' + queryParams.toString() : ''}`;

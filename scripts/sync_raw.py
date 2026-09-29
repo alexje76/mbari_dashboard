@@ -7,8 +7,10 @@ when their content changes (sha256), so untouched files keep their mtimes and
 build_dashboard_data.py's .dashboard_state.json fingerprint cache stays stable
 between runs. Files that no longer exist upstream are pruned from the mirror.
 
-Source layout -> repo mirror layout mapping lives in SOURCE_LAYOUT below;
-edit it when the raw source's folder structure changes.
+SOURCE_ROOT and SOURCE_LAYOUT below (edit them when the raw source's folder
+structure changes): SOURCE_ROOT is the folder inside the cloned source that
+holds the layout directories; SOURCE_LAYOUT maps each source folder to the
+mirror folder it lands in.
 """
 from __future__ import annotations
 
@@ -17,6 +19,8 @@ import hashlib
 import shutil
 import sys
 from pathlib import Path
+
+SOURCE_ROOT = "FTP-mockup"
 
 SOURCE_LAYOUT = {
     "Logs": "controller_logs",
@@ -39,10 +43,11 @@ def sync_source_to_mirror(source: Path, dest: Path) -> list[str]:
     """
     source = source.resolve()
     dest = dest.resolve()
+    base = source / SOURCE_ROOT if (source / SOURCE_ROOT).is_dir() else source
     changed: list[str] = []
     seen: set[Path] = set()
     for src_subdir, dst_subdir in SOURCE_LAYOUT.items():
-        src_dir = source / src_subdir
+        src_dir = base / src_subdir
         dst_dir = dest / dst_subdir
         if not src_dir.is_dir():
             continue
@@ -69,7 +74,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--source", required=True, type=Path,
-        help="Extracted/cloned raw source root (contains the SOURCE_LAYOUT folders)",
+        help="Cloned raw source repo root (or its data folder directly; SOURCE_ROOT/SOURCE_LAYOUT above locate the data)",
     )
     parser.add_argument(
         "--dest", required=True, type=Path,

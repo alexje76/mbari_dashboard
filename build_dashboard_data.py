@@ -485,6 +485,8 @@ def build(input_root: Path, output_root: Path) -> None:
     state_path = output_root / ".dashboard_state.json"
     old_state = json.loads(state_path.read_text()) if state_path.exists() else {}
     infos, current_paths = inspect_inputs(input_root, old_state, output_root)
+    if not infos:
+        raise FileNotFoundError(f"No controller log or telemetry CSVs found under {input_root}")
     old_files = old_state.get("files", {})
     changed = [x for x in infos if x["changed"]]
     removed = [x for key, x in old_files.items() if key not in current_paths]

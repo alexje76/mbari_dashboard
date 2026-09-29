@@ -24,10 +24,10 @@ All data fetches are root-relative to `/mbari_dashboard` (hard-coded `BASE_PATH`
 - Controllers (real telemetry): `free_response` → `Free Response`, `stepwise_random_bounded` → `Stepwise Random Bounded`, `stepwise_integrated_bounded` → `Stepwise Integrated Bounded` (mapped via `CONTROLLER_LABELS` in `build_dashboard_data.py`). The synthetic generator uses the same keys with a `synthetic_` prefix (`synthetic_free_response`, `synthetic_stepwise_random_bounded`, `synthetic_stepwise_integrated_bounded` → `Synthetic …` labels). `nextwave` states: `On`, `Starting`, `Off`.
 
 ## Data ingestion (real pipeline)
-`build_dashboard_data.py` is the real ingestion path (not yet wired to CI): it reads raw telemetry CSVs (10 Hz power samples + controller logs) and writes the same `data/*.csv`, `overview.csv`, `manifest.json`, `config/chartTypes.json` outputs. Keep its schema/fields in sync with the synthetic generator, and keep `CONTROLLER_LABELS` keys in sync with the generator's `CONTROLLERS` constant (both cover real + `synthetic_` names).
+`build_dashboard_data.py` is the real ingestion path, wired to CI via `.github/workflows/test-auto-update.yml`: it reads raw telemetry CSVs (10 Hz power samples) from `raw/telemetry/` and controller logs from `raw/controller_logs/`, and writes `data/*.csv`, `overview.csv`, `manifest.json`, `config/chartTypes.json`. `raw/` is a committed mirror of the raw source, synced each run by `scripts/sync_raw.py` (only changed files copied, compared by sha256, so the `.dashboard_state.json` fingerprint cache stays stable; files gone upstream are pruned). The raw source is one GitHub repo for now: `RAW_DATA_URL` + `RAW_DATA_BRANCH` env vars at the top of the workflow — repointing the source later is intended to be a (one-line) env change. The wave and NextWave loaders are still placeholders (no-ops until schemas arrive), and the pipeline fails loudly if no telemetry exists (e.g. while the source still holds placeholders). Keep its schema/fields in sync with the synthetic generator, and keep `CONTROLLER_LABELS` keys in sync with the generator's `CONTROLLERS` constant (both cover real + `synthetic_` names). `.dashboard_state.json` fingerprint keys are repo-relative so the committed cache is portable between Windows and CI.
 
 ## Regenerating data
-`SyntheticData/generate_synthetic_data.py` is the source of truth for `data/*.csv`, `data/manifest.json`, `config/chartTypes.json`, and `controller_logs/controller_logs.csv` — don't hand-edit those derived artifacts. Run from the repo root:
+`SyntheticData/generate_synthetic_data.py` is the source of truth for the **synthetic** dataset: `data/*.csv`, `data/manifest.json`, `config/chartTypes.json`, and `controller_logs/controller_logs.csv` — don't hand-edit those derived artifacts. Run from the repo root:
 
 ```
 .venv\Scripts\python.exe SyntheticData\generate_synthetic_data.py --output . --days <N> --start 2026-09-05T00:00:00Z --seed 42
@@ -36,7 +36,7 @@ All data fetches are root-relative to `/mbari_dashboard` (hard-coded `BASE_PATH`
 Default `--output` is `./data_output` (a scratch dir — pass `--output .` to write into the repo). Python 3.14 venv lives in `.venv\` (untracked, no `.gitignore`).
 
 ## CI
-`.github/workflows/test-auto-update.yml` runs daily (cron + manual dispatch): it fetches `Tester.yaml` from `alexje76/Mbari_Wec_Compare` and auto-commits if changed. `Tester.yaml` is currently a placeholder; this workflow does **not** update the CSVs.
+`.github/workflows/test-auto-update.yml` runs daily (cron + manual dispatch): it clones `RAW_DATA_URL` (single top-of-file env line) at branch `RAW_DATA_BRANCH`, syncs it into the `raw/` mirror via `scripts/sync_raw.py`, runs `build_dashboard_data.py --input-dir raw --output-dir .`, and auto-commits `raw/`, `data/`, `config/`, `.dashboard_state.json` when anything changed. While the raw source still holds placeholder files, the build fails loudly ("No telemetry CSVs were found") — expected until real data is wired in.
 
 ## Legacy / scratch
 Do not extend `js/pages/selectorold.js`, `js/shared/chartUtilsold.js`, or `OriginalTesting/` — old versions kept for reference.

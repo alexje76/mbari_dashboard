@@ -115,12 +115,13 @@ def inspect_inputs(root: Path, old_state: dict, output_root: Path) -> tuple[list
     files: list[dict] = []
     current_paths: set[str] = set()
     input_dirs = [root / "controller_logs", root / "telemetry"]
+    resolved_root = root.resolve()
 
     for input_dir in input_dirs:
         if not input_dir.is_dir():
             continue
         for path in sorted(input_dir.rglob("*.csv")):
-            key = str(path.resolve())
+            key = str(path.resolve().relative_to(resolved_root))
             current_paths.add(key)
             stat = path.stat()
             fingerprint = {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
@@ -456,8 +457,6 @@ def initialize_static_files(output_root: Path) -> None:
 
 def update_manifest(output_root: Path) -> None:
     path = output_root / "data" / "manifest.json"
-    if path.exists():
-        return
     files = sorted((output_root / "data").glob("20??-??-??.csv"))
     rows = [pd.read_csv(p, usecols=["timestamp_iso"]) for p in files]
     if rows:
@@ -465,8 +464,20 @@ def update_manifest(output_root: Path) -> None:
         available = {"minDate": stamps.min(), "maxDate": stamps.max()}
     else:
         available = {"minDate": None, "maxDate": None}
+    core = {
+        "availableDateRange": available,
+        "dayFiles": [p.stem for p in files],
+    }
+    if path.exists():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            existing = {}
+        if existing.get("availableDateRange") == available and existing.get("dayFiles") == core["dayFiles"]:
+            return
+    core["lastUpdated"] = pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%dT%H:%M:%SZ")
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"availableDateRange": available, "dayFiles": [p.stem for p in files], "lastUpdated": pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%dT%H:%M:%SZ")}, indent=2) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(core, indent=2) + "\n", encoding="utf-8")
 
 
 def build(input_root: Path, output_root: Path) -> None:

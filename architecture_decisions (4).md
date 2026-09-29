@@ -8,13 +8,15 @@ Static website hosted on GitHub Pages, displaying time-series buoy sensor/system
 ## Data Pipeline
 
 ### Pipeline Overview
-A **GitHub Action** ingests raw data (source/format TBD, arrives hourly) and generates static files, committed to the repo.
+A **GitHub Action** (`.github/workflows/test-auto-update.yml`, daily cron + manual dispatch) pulls raw data from an external repo and builds the static dashboard files, committing them to `main`. The raw source is defined by the `RAW_DATA_URL` / `RAW_DATA_BRANCH` env vars at the top of the workflow — repointing the source later is intended to be a one-line change. Each run clones the source, syncs it into the committed `raw/` mirror via `scripts/sync_raw.py` (sha256-change detection so only genuinely changed CSVs are copied; `raw/controller_logs` + `raw/telemetry` mirror the pipeline's expected layout; files removed upstream are pruned), then runs `build_dashboard_data.py --input-dir raw --output-dir .`.
 
 ### Generated Files
+- `/raw/controller_logs/*.csv`, `/raw/telemetry/*.csv` — committed mirror of the raw source (controller logs + 10 Hz telemetry), synced by `scripts/sync_raw.py`.
 - `/data/YYYY-MM-DD.csv` — one file per day, full resolution (1-minute).
 - `/data/overview.csv` — downsampled to hourly, spans entire available history.
-- `/data/manifest.json` — lists available day-files and the overall min/max available date range, so the frontend knows what data exists without failed fetch attempts.
+- `/data/manifest.json` — lists available day-files and the overall min/max available date range, so the frontend knows what data exists without failed fetch attempts. Recomputed on every build and written only when `dayFiles`/`availableDateRange` actually change (so new real data reaches the site without churning `lastUpdated`).
 - `/config/chartTypes.json` — list of available chart types (dynamically read by frontend).
+- `.dashboard_state.json` — fingerprint cache keyed by repo-relative paths (portable between Windows and CI) so unchanged raw files skip reprocessing.
 - Dataset **grows over time** (new day-files appended as new data arrives); frontend must treat the available date range as dynamic, not fixed.
 
 ---

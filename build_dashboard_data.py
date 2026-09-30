@@ -594,6 +594,12 @@ def update_manifest(output_root: Path) -> None:
 
 def build(input_root: Path, output_root: Path) -> None:
     output_root.mkdir(parents=True, exist_ok=True)
+    input_root = input_root.resolve()
+    # State keys are relative to input_root (so the committed cache stays
+    # portable); re-join them here instead of relying on the working directory.
+    def source(info: dict) -> Path:
+        return input_root / info["path"]
+
     state_path = output_root / ".dashboard_state.json"
     old_state = json.loads(state_path.read_text()) if state_path.exists() else {}
     infos, current_paths = inspect_inputs(input_root, old_state, output_root)
@@ -610,8 +616,8 @@ def build(input_root: Path, output_root: Path) -> None:
 
     telemetry = [x for x in infos if x["kind"] == "telemetry"]
     controllers = [x for x in infos if x["kind"] == "controller"]
-    wave_files = [Path(x["path"]) for x in infos if x["kind"] == "wave"]
-    nextwave_files = [Path(x["path"]) for x in infos if x["kind"] == "nextwave"]
+    wave_files = [source(x) for x in infos if x["kind"] == "wave"]
+    nextwave_files = [source(x) for x in infos if x["kind"] == "nextwave"]
     if not telemetry:
         raise FileNotFoundError("No telemetry CSVs were found")
     tele_min = min(x["min"] for x in telemetry if x["min"] is not None)
@@ -645,13 +651,13 @@ def build(input_root: Path, output_root: Path) -> None:
     end = min(end, float((np.floor(tele_max / 60) + 1) * 60))
 
     selected = [x for x in telemetry if x["max"] is not None and x["min"] < end and x["max"] >= start]
-    raw_parts = [read_telemetry(Path(x["path"]), start, end) for x in selected]
+    raw_parts = [read_telemetry(source(x), start, end) for x in selected]
     raw = pd.concat(raw_parts, ignore_index=True) if raw_parts else pd.DataFrame()
     if raw.empty:
         raise ValueError("No telemetry samples remain in the affected timestamp range")
     if raw.duplicated(["Timestamp (epoch seconds)", "Source ID"]).any():
         raise ValueError("Duplicate telemetry samples found for the same timestamp and Source ID")
-    events = read_controller_logs([Path(x["path"]) for x in controllers])
+    events = read_controller_logs([source(x) for x in controllers])
     if events.empty:
         warn("No usable controller events found; controller values will be Undefined")
     elif events["wall_epoch_seconds"].max() < tele_min or events["wall_epoch_seconds"].min() > tele_max:

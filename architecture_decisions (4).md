@@ -99,6 +99,7 @@ Real ingestion pipeline (the "GitHub Action" step): reads raw telemetry CSVs (10
 - `power_in` / `power_to_controller` split as above.
 - NextWave metrics come from the raw `nextwave_*.csv` logs via `load_nextwave_data()` (see "Next Wave Prediction" above); the wave loader is still a placeholder until its raw schema is known.
 - **Incremental rebuild window:** derived from the files whose content changed (tracked by `.dashboard_state.json` fingerprints). Changed telemetry files contribute their own `[min, max]`; a changed or removed `controller`/`nextwave`/`wave` log extends the window from that log's first event to the end of telemetry, so forward-filled NextWave values stay consistent and deleted logs clear their columns. The window is clamped to the telemetry range, and a run where only `additional` CSVs changed leaves the dashboard files untouched.
+- **State paths are input-root-relative:** the keys stored in `.dashboard_state.json` are relative to `--input-dir` and are re-joined with it when reading (`source()` in `build()`), so the committed fingerprint cache works identically on Windows and CI regardless of the working directory.
 
 **Raw telemetry field mapping** (`TELEMETRY_COLUMNS`, Source ID → controller):
 

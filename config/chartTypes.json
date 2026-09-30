@@ -67,15 +67,153 @@
       "category": "prediction"
     },
     {
-      "name": "nextwave_error",
-      "label": "NextWave Error",
-      "unit": "RMS",
+      "name": "forecast_skill_mean",
+      "label": "Forecast Skill Mean",
+      "unit": "value",
       "category": "prediction"
     },
     {
-      "name": "nextwave_error_2",
-      "label": "NextWave Error 2",
+      "name": "solver_error",
+      "label": "Solver Error",
       "unit": "value",
+      "category": "prediction"
+    },
+    {
+      "name": "wavespec_hs",
+      "label": "Wavespec Hs",
+      "unit": "m",
+      "category": "prediction"
+    },
+    {
+      "name": "wavespec_tp",
+      "label": "Wavespec Tp",
+      "unit": "s",
+      "category": "prediction"
+    },
+    {
+      "name": "forecast_skill_lead_sec",
+      "label": "Forecast Skill Lead",
+      "unit": "s",
+      "category": "prediction"
+    },
+    {
+      "name": "wavespec_tm01",
+      "label": "Wavespec Tm01",
+      "unit": "s",
+      "category": "prediction"
+    },
+    {
+      "name": "wavespec_tm02",
+      "label": "Wavespec Tm02",
+      "unit": "s",
+      "category": "prediction"
+    },
+    {
+      "name": "wavespec_dp",
+      "label": "Wavespec Dp",
+      "unit": "\u00b0",
+      "category": "prediction"
+    },
+    {
+      "name": "wavespec_dm",
+      "label": "Wavespec Dm",
+      "unit": "\u00b0",
+      "category": "prediction"
+    },
+    {
+      "name": "wavespec_spreadp",
+      "label": "Wavespec Spread P",
+      "unit": "\u00b0",
+      "category": "prediction"
+    },
+    {
+      "name": "forecast_skill_n_scored",
+      "label": "Forecast Skill N Scored",
+      "unit": "count",
+      "category": "prediction"
+    },
+    {
+      "name": "forecast_skill_buoy_0",
+      "label": "Forecast Skill Buoy 0",
+      "unit": "value",
+      "category": "prediction"
+    },
+    {
+      "name": "forecast_skill_buoy_1",
+      "label": "Forecast Skill Buoy 1",
+      "unit": "value",
+      "category": "prediction"
+    },
+    {
+      "name": "forecast_skill_buoy_2",
+      "label": "Forecast Skill Buoy 2",
+      "unit": "value",
+      "category": "prediction"
+    },
+    {
+      "name": "forecast_skill_buoy_3",
+      "label": "Forecast Skill Buoy 3",
+      "unit": "value",
+      "category": "prediction"
+    },
+    {
+      "name": "solve_time_min_s",
+      "label": "Solve Time Min",
+      "unit": "s",
+      "category": "prediction"
+    },
+    {
+      "name": "solve_time_max_s",
+      "label": "Solve Time Max",
+      "unit": "s",
+      "category": "prediction"
+    },
+    {
+      "name": "solve_time_avg_s",
+      "label": "Solve Time Avg",
+      "unit": "s",
+      "category": "prediction"
+    },
+    {
+      "name": "solver_objective",
+      "label": "Solver Objective",
+      "unit": "value",
+      "category": "prediction"
+    },
+    {
+      "name": "num_wavelengths",
+      "label": "Num Wavelengths",
+      "unit": "count",
+      "category": "prediction"
+    },
+    {
+      "name": "has_wavespec_bulk",
+      "label": "Has Wavespec Bulk",
+      "unit": "flag",
+      "category": "prediction"
+    },
+    {
+      "name": "n_measurements",
+      "label": "Measurements",
+      "unit": "count",
+      "category": "prediction"
+    },
+    {
+      "name": "n_windows",
+      "label": "Windows",
+      "unit": "count",
+      "category": "prediction"
+    },
+    {
+      "name": "window_start_time",
+      "label": "Window Start",
+      "unit": "s",
+      "category": "prediction"
+    },
+    {
+      "name": "window_end_time",
+      "label": "Window End",
+      "unit": "s",
       "category": "prediction"
     }
   ]

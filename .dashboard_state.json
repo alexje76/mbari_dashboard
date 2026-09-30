@@ -1,22 +1,31 @@
 {
   "version": 1,
   "files": {
-    "controller_logs/controller_logs.csv": {
+    "controller_logs/controller_2026-09-30_005528_103088Z.csv": {
       "kind": "controller",
-      "min": 1788566400.0,
-      "max": 1790394240.0,
+      "min": 1790729728.1065235,
+      "max": 1790730652.865058,
       "fingerprint": {
-        "size": 1938,
-        "mtime_ns": 1790735444927485483
+        "size": 1618,
+        "mtime_ns": 1790807823129747102
       }
     },
-    "telemetry/2026.09.16T03.40.11.csv": {
-      "kind": "telemetry",
-      "min": 1789598411.711,
-      "max": 1789599048.611,
+    "controller_logs/nextwave_2026-09-30_005528_103841Z.csv": {
+      "kind": "nextwave",
+      "min": 1790729728.106629,
+      "max": 1790730613.3811984,
       "fingerprint": {
-        "size": 5401862,
-        "mtime_ns": 1790735444940111233
+        "size": 6488,
+        "mtime_ns": 1790807823129875773
+      }
+    },
+    "telemetry/2026.09.29T05.51.47.csv": {
+      "kind": "telemetry",
+      "min": 1790729507.785,
+      "max": 1790730535.845,
+      "fingerprint": {
+        "size": 8730128,
+        "mtime_ns": 1790807823153460853
       }
     }
   }

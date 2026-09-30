@@ -622,9 +622,14 @@ def build(input_root: Path, output_root: Path) -> None:
         start, end = tele_min, tele_max + 60
     else:
         ranges = [(x.get("min"), x.get("max")) for x in changed if x.get("kind") == "telemetry"]
-        ranges += [(x.get("min"), x.get("max")) for x in changed if x.get("kind") == "telemetry"]
-        if "controller" in changed_kinds:
-            ranges.append((min(x["min"] for x in changed if x.get("kind") == "controller" and x.get("min") is not None), tele_max))
+        # Log kinds whose minutes derive from the event stream rather than
+        # telemetry: a change (or removal) anywhere rebinds everything from the
+        # earliest such event through the end of telemetry, so forward-filled
+        # values stay consistent and deleted logs clear their columns.
+        for kind in ("controller", "nextwave", "wave"):
+            starts = [x.get("min") for x in changed if x.get("kind") == kind and x.get("min") is not None]
+            if starts:
+                ranges.append((min(starts), tele_max))
         ranges = [(a, b) for a, b in ranges if a is not None and b is not None]
         if not ranges:
             state = {"version": 1, "files": {x["path"]: {k: v for k, v in x.items() if k not in {"path", "changed"}} for x in infos}}
@@ -635,6 +640,9 @@ def build(input_root: Path, output_root: Path) -> None:
         end = (np.floor(max(b for _, b in ranges) / 60) + 1) * 60
     start = float(np.floor(start / 60) * 60)
     end = float((np.floor(end / 60) + 1) * 60 if end <= start else end)
+    # The rebuild window can only cover minutes telemetry actually covers.
+    start = max(start, float(np.floor(tele_min / 60) * 60))
+    end = min(end, float((np.floor(tele_max / 60) + 1) * 60))
 
     selected = [x for x in telemetry if x["max"] is not None and x["min"] < end and x["max"] >= start]
     raw_parts = [read_telemetry(Path(x["path"]), start, end) for x in selected]

@@ -44,10 +44,15 @@ A **GitHub Action** (`.github/workflows/test-auto-update.yml`, daily cron + manu
 ### System State
 - `peaks` — int, 1–3 (independent per-minute, or summed hourly for overview).
 
-### Next Wave Prediction (experimental; new columns)
-- `nextwave` — string enum, e.g., `On`, `Starting`, `Off` (state that persists for 30–120 min blocks).
-- `nextwave_error` — float, RMS value, typically 0–~1500 (prediction error metric).
-- `nextwave_error_2` — float, 0–~1000, lower is better (secondary error metric).
+### Next Wave Prediction (experimental; `NEXTWAVE_FIELDS`)
+- `nextwave` — string categorical state. Synthetic data uses `On`/`Starting`/`Off`; real data carries the raw log's event names (`nextwave_summary`, `nextwave_running`, `nextwave_pre_window_fill`).
+- `forecast_skill_mean` — float, primary metric (mean forecast skill, ±1, higher is better). Renamed from `nextwave_error`.
+- `solver_error` — float, secondary metric (window solver error). Renamed from `nextwave_error_2`.
+- Solver diagnostics: `solve_time_min_s`, `solve_time_max_s`, `solve_time_avg_s`, `solver_objective`, `num_wavelengths`, `has_wavespec_bulk`, `n_measurements`, `n_windows`, `window_start_time`, `window_end_time`.
+- Wave spectrum: `wavespec_hs`, `wavespec_tp`, `wavespec_tm01`, `wavespec_tm02`, `wavespec_dp`, `wavespec_dm`, `wavespec_spreadp`.
+- Forecast skill detail: `forecast_skill_lead_sec`, `forecast_skill_n_scored`, `forecast_skill_buoy_0..3`.
+
+Real data comes from the raw `nextwave_*.csv` logs via `load_nextwave_data()`: each row is floored to its minute, `nextwave` is the most recent event (forward-filled), and the numeric summary fields come from the last `nextwave_summary` row of each minute, forward-filled between summaries.
 
 **Important:** All numeric columns (except `timestamp_ns`, `timestamp_iso`, and `controller`) are treated as potential chart types. No chart type is hardcoded; all are read from `chartTypes.json`. Controller values are not hardcoded; all unique values from the CSV are treated as valid controllers.
 
@@ -92,7 +97,7 @@ Real ingestion pipeline (the "GitHub Action" step): reads raw telemetry CSVs (10
 - `battery_voltage` = minute mean of `BC Voltage` (Battery Controller, Source ID 0).
 - `battery_pct` = `voltage_to_percent(BC Voltage)` — piecewise-linear lead-acid curve, swappable via the `LEAD_ACID_BANK_SOC_CURVE` table at the top of the file. Values outside the curve span become NaN (sanity filter for the observed 141 V transient spikes).
 - `power_in` / `power_to_controller` split as above.
-- Wave and NextWave loaders are placeholders until their raw schemas are known.
+- NextWave metrics come from the raw `nextwave_*.csv` logs via `load_nextwave_data()` (see "Next Wave Prediction" above); the wave loader is still a placeholder until its raw schema is known.
 
 **Raw telemetry field mapping** (`TELEMETRY_COLUMNS`, Source ID → controller):
 
@@ -350,11 +355,11 @@ Real ingestion pipeline (the "GitHub Action" step): reads raw telemetry CSVs (10
 ```
 
 **Key Specifications:**
-- Chart selector: checkboxes for all columns in the "Next Wave" category (`nextwave`, `nextwave_error`, `nextwave_error_2`), auto-loaded from `chartTypes.json` (`category: "prediction"`) so future prediction columns added to the config appear automatically. Selection persists via the `chartTypes` URL param and defaults to all on.
+- Chart selector: checkboxes for all columns in the "Next Wave" category (`nextwave`, `forecast_skill_mean`, `solver_error`, `wavespec_*`, `forecast_skill_*`, `solve_time_*`, …), auto-loaded from `chartTypes.json` (`category: "prediction"`) so future prediction columns added to the config appear automatically. Selection persists via the `chartTypes` URL param; with no param it defaults to the curated subset in `DEFAULT_PREDICTION_CHARTS` (state, forecast skill mean, solver error, wavespec Hs/Tp, forecast skill lead).
 - All selected charts displayed as stacked vertical sections.
 - Shared X-axis zoom (Y-axes independent) — synced across the stacked charts via `syncChartZoom`.
 - The `nextwave` state column plots on a categorical y-axis; numeric prediction columns plot as value-axis lines with area fill.
-- **Prediction Scatter (`#chartScatter`):** one `scatter` series per controller, `[x, y]` per-minute points. X-axis selectable among the numeric metrics from `chartTypes.json` (`#scatterXAxis`); Y-axis selectable among `nextwave_error`, `nextwave_error_2`, and the `nextwave` state (`#scatterYAxis`). When the state metric is on an axis it maps to three positions — `Off→1`, `Starting→2`, `On→3` (value axis, ticks labeled with the state names). Axis choices persist via `scatterX`/`scatterY` URL params; defaults `sea_state_energy` / `nextwave_error`.
+- **Prediction Scatter (`#chartScatter`):** one `scatter` series per controller, `[x, y]` per-minute points. X-axis selectable among the numeric metrics from `chartTypes.json` (`#scatterXAxis`); Y-axis selectable among all `prediction` columns (`#scatterYAxis`). When the state metric is on an axis it maps to ordered bands derived from the distinct categories present in the visible rows (real: `nextwave_summary`/`nextwave_running`/…; synthetic: `Off`/`Starting`/`On`) — value axis, ticks labeled with the category names. Axis choices persist via `scatterX`/`scatterY` URL params; defaults `sea_state_energy` / `forecast_skill_mean`.
 - **Controller Selector (`#scatterControllerCheckboxes`):** mirrors the selector page's checkbox+swatch pattern; unchecking a controller excludes its rows from *all* charts on the page (stacked + scatter). Selection persists via the shared `controllers` URL param and defaults to all controllers in range. A "No controller data in range." note replaces the scatter when nothing remains.
 - Date range: defaults to past 2 days.
 
@@ -499,8 +504,31 @@ Each page (e.g., `selector.js`) handles:
     {"name": "tp", "label": "Wave Period (Tp)", "unit": "s", "category": "wave"},
     {"name": "peaks", "label": "Peaks", "unit": "count", "category": "system"},
     {"name": "nextwave", "label": "NextWave State", "unit": "state", "category": "prediction"},
-    {"name": "nextwave_error", "label": "NextWave Error", "unit": "RMS", "category": "prediction"},
-    {"name": "nextwave_error_2", "label": "NextWave Error 2", "unit": "value", "category": "prediction"}
+    {"name": "forecast_skill_mean", "label": "Forecast Skill Mean", "unit": "value", "category": "prediction"},
+    {"name": "solver_error", "label": "Solver Error", "unit": "value", "category": "prediction"},
+    {"name": "wavespec_hs", "label": "Wavespec Hs", "unit": "m", "category": "prediction"},
+    {"name": "wavespec_tp", "label": "Wavespec Tp", "unit": "s", "category": "prediction"},
+    {"name": "forecast_skill_lead_sec", "label": "Forecast Skill Lead", "unit": "s", "category": "prediction"},
+    {"name": "wavespec_tm01", "label": "Wavespec Tm01", "unit": "s", "category": "prediction"},
+    {"name": "wavespec_tm02", "label": "Wavespec Tm02", "unit": "s", "category": "prediction"},
+    {"name": "wavespec_dp", "label": "Wavespec Dp", "unit": "°", "category": "prediction"},
+    {"name": "wavespec_dm", "label": "Wavespec Dm", "unit": "°", "category": "prediction"},
+    {"name": "wavespec_spreadp", "label": "Wavespec Spread P", "unit": "°", "category": "prediction"},
+    {"name": "forecast_skill_n_scored", "label": "Forecast Skill N Scored", "unit": "count", "category": "prediction"},
+    {"name": "forecast_skill_buoy_0", "label": "Forecast Skill Buoy 0", "unit": "value", "category": "prediction"},
+    {"name": "forecast_skill_buoy_1", "label": "Forecast Skill Buoy 1", "unit": "value", "category": "prediction"},
+    {"name": "forecast_skill_buoy_2", "label": "Forecast Skill Buoy 2", "unit": "value", "category": "prediction"},
+    {"name": "forecast_skill_buoy_3", "label": "Forecast Skill Buoy 3", "unit": "value", "category": "prediction"},
+    {"name": "solve_time_min_s", "label": "Solve Time Min", "unit": "s", "category": "prediction"},
+    {"name": "solve_time_max_s", "label": "Solve Time Max", "unit": "s", "category": "prediction"},
+    {"name": "solve_time_avg_s", "label": "Solve Time Avg", "unit": "s", "category": "prediction"},
+    {"name": "solver_objective", "label": "Solver Objective", "unit": "value", "category": "prediction"},
+    {"name": "num_wavelengths", "label": "Num Wavelengths", "unit": "count", "category": "prediction"},
+    {"name": "has_wavespec_bulk", "label": "Has Wavespec Bulk", "unit": "flag", "category": "prediction"},
+    {"name": "n_measurements", "label": "Measurements", "unit": "count", "category": "prediction"},
+    {"name": "n_windows", "label": "Windows", "unit": "count", "category": "prediction"},
+    {"name": "window_start_time", "label": "Window Start", "unit": "s", "category": "prediction"},
+    {"name": "window_end_time", "label": "Window End", "unit": "s", "category": "prediction"}
   ]
 }
 ```

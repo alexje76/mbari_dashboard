@@ -18,19 +18,50 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterator
 
+# Per-minute NextWave columns; keep schema-identical with NEXTWAVE_FIELDS in
+# build_dashboard_data.py (the real pipeline derives these from the raw
+# nextwave_*.csv logs). Synthetic values are fabricated, Off-state rows carry
+# NaN stats to mirror the real summary cadence.
+NEXTWAVE_FIELDS = [
+    "nextwave",
+    "forecast_skill_mean",
+    "solver_error",
+    "wavespec_hs",
+    "wavespec_tp",
+    "wavespec_tm01",
+    "wavespec_tm02",
+    "wavespec_dp",
+    "wavespec_dm",
+    "wavespec_spreadp",
+    "forecast_skill_lead_sec",
+    "forecast_skill_n_scored",
+    "forecast_skill_buoy_0",
+    "forecast_skill_buoy_1",
+    "forecast_skill_buoy_2",
+    "forecast_skill_buoy_3",
+    "solve_time_min_s",
+    "solve_time_max_s",
+    "solve_time_avg_s",
+    "solver_objective",
+    "num_wavelengths",
+    "has_wavespec_bulk",
+    "n_measurements",
+    "n_windows",
+    "window_start_time",
+    "window_end_time",
+]
+
 MINUTE_FIELDS = [
     "timestamp_ns", "timestamp_iso", "controller", "hs", "tp", "avg_power",
     "power_in", "power_to_controller", "battery_voltage", "battery_pct",
-    "sea_state_energy", "efficiency", "peaks", "nextwave", "nextwave_error",
-    "nextwave_error_2",
-]
+    "sea_state_energy", "efficiency", "peaks",
+] + NEXTWAVE_FIELDS
 
 OVERVIEW_FIELDS = [
     "timestamp_ns", "timestamp_iso", "controller", "hs", "tp", "avg_power",
     "power_in", "power_to_controller", "battery_voltage", "battery_pct",
-    "sea_state_energy", "efficiency", "peaks_total", "nextwave",
-    "nextwave_error", "nextwave_error_2",
-]
+    "sea_state_energy", "efficiency", "peaks_total",
+] + NEXTWAVE_FIELDS
 
 # Controller keys match the internal labels in build_dashboard_data.py
 # (CONTROLLER_LABELS) but are prefixed with "synthetic_" so generated logs are
@@ -59,8 +90,31 @@ CHART_TYPES_CONFIG = {
         {"name": "tp", "label": "Wave Period (Tp)", "unit": "s", "category": "wave"},
         {"name": "peaks", "label": "Peaks", "unit": "count", "category": "system"},
         {"name": "nextwave", "label": "NextWave State", "unit": "state", "category": "prediction"},
-        {"name": "nextwave_error", "label": "NextWave Error", "unit": "RMS", "category": "prediction"},
-        {"name": "nextwave_error_2", "label": "NextWave Error 2", "unit": "value", "category": "prediction"},
+        {"name": "forecast_skill_mean", "label": "Forecast Skill Mean", "unit": "value", "category": "prediction"},
+        {"name": "solver_error", "label": "Solver Error", "unit": "value", "category": "prediction"},
+        {"name": "wavespec_hs", "label": "Wavespec Hs", "unit": "m", "category": "prediction"},
+        {"name": "wavespec_tp", "label": "Wavespec Tp", "unit": "s", "category": "prediction"},
+        {"name": "forecast_skill_lead_sec", "label": "Forecast Skill Lead", "unit": "s", "category": "prediction"},
+        {"name": "wavespec_tm01", "label": "Wavespec Tm01", "unit": "s", "category": "prediction"},
+        {"name": "wavespec_tm02", "label": "Wavespec Tm02", "unit": "s", "category": "prediction"},
+        {"name": "wavespec_dp", "label": "Wavespec Dp", "unit": "°", "category": "prediction"},
+        {"name": "wavespec_dm", "label": "Wavespec Dm", "unit": "°", "category": "prediction"},
+        {"name": "wavespec_spreadp", "label": "Wavespec Spread P", "unit": "°", "category": "prediction"},
+        {"name": "forecast_skill_n_scored", "label": "Forecast Skill N Scored", "unit": "count", "category": "prediction"},
+        {"name": "forecast_skill_buoy_0", "label": "Forecast Skill Buoy 0", "unit": "value", "category": "prediction"},
+        {"name": "forecast_skill_buoy_1", "label": "Forecast Skill Buoy 1", "unit": "value", "category": "prediction"},
+        {"name": "forecast_skill_buoy_2", "label": "Forecast Skill Buoy 2", "unit": "value", "category": "prediction"},
+        {"name": "forecast_skill_buoy_3", "label": "Forecast Skill Buoy 3", "unit": "value", "category": "prediction"},
+        {"name": "solve_time_min_s", "label": "Solve Time Min", "unit": "s", "category": "prediction"},
+        {"name": "solve_time_max_s", "label": "Solve Time Max", "unit": "s", "category": "prediction"},
+        {"name": "solve_time_avg_s", "label": "Solve Time Avg", "unit": "s", "category": "prediction"},
+        {"name": "solver_objective", "label": "Solver Objective", "unit": "value", "category": "prediction"},
+        {"name": "num_wavelengths", "label": "Num Wavelengths", "unit": "count", "category": "prediction"},
+        {"name": "has_wavespec_bulk", "label": "Has Wavespec Bulk", "unit": "flag", "category": "prediction"},
+        {"name": "n_measurements", "label": "Measurements", "unit": "count", "category": "prediction"},
+        {"name": "n_windows", "label": "Windows", "unit": "count", "category": "prediction"},
+        {"name": "window_start_time", "label": "Window Start", "unit": "s", "category": "prediction"},
+        {"name": "window_end_time", "label": "Window End", "unit": "s", "category": "prediction"},
     ]
 }
 
@@ -212,17 +266,50 @@ def controller_log_rows(all_rows: list[dict], start: datetime) -> list[dict]:
 def nextwave_state_series(rng: random.Random, total_minutes: int) -> Iterator[tuple[str, float, float]]:
     state = rng.choice(NEXTWAVE_STATES)
     state_left = rng.randint(30, 120)
-    error, error_2 = rng.uniform(0, 1500), rng.uniform(0, 1000)
+    skill, solver = rng.uniform(-1, 1), rng.uniform(0, 2)
     for _ in range(total_minutes):
         if state_left <= 0:
             state, state_left = rng.choice(NEXTWAVE_STATES), rng.randint(30, 120)
         if rng.random() < 0.05:
-            error, error_2 = rng.uniform(500, 1500), rng.uniform(300, 1000)
+            skill += rng.uniform(-0.3, 0.3)
+            solver = rng.uniform(0.3, 1.5)
         else:
-            error += rng.uniform(-50, 50)
-            error_2 += rng.uniform(-30, 30)
-        yield state, round(max(0.0, min(1500.0, error)), 2), round(max(0.0, min(1000.0, error_2)), 2)
+            skill += rng.uniform(-0.05, 0.05)
+            solver += rng.uniform(-0.05, 0.05)
+        yield state, round(max(-1.0, min(1.0, skill)), 2), round(max(0.0, min(2.0, solver)), 2)
         state_left -= 1
+
+
+def fabricate_nextwave_stats(rng: random.Random, hs: float, tp: float, minute_of_run: int) -> dict:
+    """Fabricate window-summary statistics for one On/Starting minute."""
+    t = round(tp * (1 + rng.uniform(-0.05, 0.05)), 2)
+    h = round(hs * (1 + rng.uniform(-0.05, 0.05)), 2)
+    run_seconds = minute_of_run * 60
+    return {
+        "wavespec_hs": h,
+        "wavespec_tp": t,
+        "wavespec_tm01": round(t * rng.uniform(0.7, 0.85), 2),
+        "wavespec_tm02": round(t * rng.uniform(0.8, 0.9), 2),
+        "wavespec_dp": rng.randint(20, 340),
+        "wavespec_dm": rng.randint(20, 340),
+        "wavespec_spreadp": round(rng.uniform(10, 60), 2),
+        "forecast_skill_lead_sec": 4.0,
+        "forecast_skill_n_scored": rng.randint(20, 150),
+        "forecast_skill_buoy_0": round(rng.uniform(-1, 1), 2),
+        "forecast_skill_buoy_1": round(rng.uniform(-1, 1), 2),
+        "forecast_skill_buoy_2": round(rng.uniform(-1, 1), 2),
+        "forecast_skill_buoy_3": round(rng.uniform(-1, 1), 2),
+        "solve_time_min_s": round(rng.uniform(0.4, 0.8), 2),
+        "solve_time_max_s": round(rng.uniform(1.0, 4.0), 2),
+        "solve_time_avg_s": round(rng.uniform(0.5, 1.0), 2),
+        "solver_objective": round(rng.uniform(50, 250), 2),
+        "num_wavelengths": 1000,
+        "has_wavespec_bulk": 1,
+        "n_measurements": rng.randint(580, 650),
+        "n_windows": rng.randint(50, 60),
+        "window_start_time": round(run_seconds + rng.uniform(20, 80), 2),
+        "window_end_time": round(run_seconds + rng.uniform(100, 180), 2),
+    }
 
 
 def generate_minute_rows(rng: random.Random, start: datetime, total_minutes: int) -> Iterator[dict]:
@@ -234,8 +321,9 @@ def generate_minute_rows(rng: random.Random, start: datetime, total_minutes: int
         zip(sea_states, controllers, batteries, nextwaves)
     ):
         timestamp = start + timedelta(minutes=i)
-        nw_state, nw_err, nw_err2 = nextwave
+        nw_state, nw_skill, nw_solver = nextwave
         sse = sea_state_energy(hs, tp, rng)
+        stats = {} if nw_state == "Off" else fabricate_nextwave_stats(rng, hs, tp, i)
         yield {
             "timestamp_ns": ros2_ns(timestamp),
             "timestamp_iso": iso_timestamp(timestamp),
@@ -251,8 +339,9 @@ def generate_minute_rows(rng: random.Random, start: datetime, total_minutes: int
             "efficiency": calculate_efficiency(avg_power, sse),
             "peaks": rng.randint(1, 3),
             "nextwave": nw_state,
-            "nextwave_error": nw_err,
-            "nextwave_error_2": nw_err2,
+            "forecast_skill_mean": nw_skill if nw_state != "Off" else None,
+            "solver_error": nw_solver if nw_state != "Off" else None,
+            **stats,
         }
 
 
@@ -263,24 +352,23 @@ def downsample_to_hourly(minute_rows: list[dict]) -> list[dict]:
         if len(bucket) < 60:
             break
         first = bucket[0]
-        avg = lambda key, nd: round(sum(row[key] for row in bucket) / len(bucket), nd)
-        hourly_rows.append({
+
+        def avg(key: str, nd: int):
+            vals = [row[key] for row in bucket if row.get(key) is not None]
+            return round(sum(vals) / len(vals), nd) if vals else None
+
+        row = {
             "timestamp_ns": first["timestamp_ns"],
             "timestamp_iso": first["timestamp_iso"],
             "controller": first["controller"],
-            "hs": avg("hs", 3), "tp": avg("tp", 3),
-            "avg_power": avg("avg_power", 2),
-            "power_in": avg("power_in", 2),
-            "power_to_controller": avg("power_to_controller", 2),
-            "battery_voltage": avg("battery_voltage", 2),
-            "battery_pct": avg("battery_pct", 2),
-            "sea_state_energy": avg("sea_state_energy", 2),
-            "efficiency": avg("efficiency", 2),
             "peaks_total": sum(row["peaks"] for row in bucket),
             "nextwave": bucket[-1]["nextwave"],
-            "nextwave_error": avg("nextwave_error", 2),
-            "nextwave_error_2": avg("nextwave_error_2", 2),
-        })
+        }
+        for col in OVERVIEW_FIELDS:
+            if col in row:
+                continue
+            row[col] = avg(col, 2)
+        hourly_rows.append(row)
     return hourly_rows
 
 

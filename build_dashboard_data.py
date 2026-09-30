@@ -5,8 +5,9 @@ Input CSVs are discovered recursively. Telemetry is kept in source rows (it is
 not merged by Source ID); analytics are calculated only from rows containing
 the required signal. Controller logs are joined by wall-clock epoch time.
 
-The wave and NextWave loaders are intentionally no-ops until their schemas are
-available. Replace those two functions without changing the aggregation code.
+The wave loader is intentionally a no-op until its schema is available; the
+NextWave loader reads the raw nextwave_*.csv logs (see load_nextwave_data).
+Replace load_wave_data without changing the aggregation code.
 """
 from __future__ import annotations
 
@@ -20,18 +21,50 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+# Per-minute columns derived from the raw NextWave logs (nextwave_*.csv). Names
+# mirror the log's header so fields stay traceable to source: "nextwave" carries
+# the most recent log event name; everything else is a window-summary numeric
+# (solver / wavespec / forecast-skill). Keep this list and the chartTypes
+# prediction entries in sync with SyntheticData/generate_synthetic_data.py.
+NEXTWAVE_FIELDS = [
+    "nextwave",
+    "forecast_skill_mean",
+    "solver_error",
+    "wavespec_hs",
+    "wavespec_tp",
+    "wavespec_tm01",
+    "wavespec_tm02",
+    "wavespec_dp",
+    "wavespec_dm",
+    "wavespec_spreadp",
+    "forecast_skill_lead_sec",
+    "forecast_skill_n_scored",
+    "forecast_skill_buoy_0",
+    "forecast_skill_buoy_1",
+    "forecast_skill_buoy_2",
+    "forecast_skill_buoy_3",
+    "solve_time_min_s",
+    "solve_time_max_s",
+    "solve_time_avg_s",
+    "solver_objective",
+    "num_wavelengths",
+    "has_wavespec_bulk",
+    "n_measurements",
+    "n_windows",
+    "window_start_time",
+    "window_end_time",
+]
+
 MINUTE_FIELDS = [
     "timestamp_ns", "timestamp_iso", "controller", "hs", "tp", "avg_power",
     "power_in", "power_to_controller", "battery_voltage", "battery_pct",
-    "sea_state_energy", "efficiency", "peaks", "nextwave", "nextwave_error",
-    "nextwave_error_2",
-]
+    "sea_state_energy", "efficiency", "peaks",
+] + NEXTWAVE_FIELDS
 OVERVIEW_FIELDS = [
     "timestamp_ns", "timestamp_iso", "controller", "hs", "tp", "avg_power",
     "power_in", "power_to_controller", "battery_voltage", "battery_pct",
-    "sea_state_energy", "efficiency", "peaks_total", "nextwave",
-    "nextwave_error", "nextwave_error_2",
-]
+    "sea_state_energy", "efficiency", "peaks_total",
+] + NEXTWAVE_FIELDS
 
 TELEMETRY_COLUMNS = {
     "Source ID", "Timestamp (epoch seconds)", "PC Bus Voltage (V)",
@@ -62,8 +95,31 @@ CHART_TYPES_CONFIG = {
         {"name": "tp", "label": "Wave Period (Tp)", "unit": "s", "category": "wave"},
         {"name": "peaks", "label": "Peaks", "unit": "count", "category": "system"},
         {"name": "nextwave", "label": "NextWave State", "unit": "state", "category": "prediction"},
-        {"name": "nextwave_error", "label": "NextWave Error", "unit": "RMS", "category": "prediction"},
-        {"name": "nextwave_error_2", "label": "NextWave Error 2", "unit": "value", "category": "prediction"},
+        {"name": "forecast_skill_mean", "label": "Forecast Skill Mean", "unit": "value", "category": "prediction"},
+        {"name": "solver_error", "label": "Solver Error", "unit": "value", "category": "prediction"},
+        {"name": "wavespec_hs", "label": "Wavespec Hs", "unit": "m", "category": "prediction"},
+        {"name": "wavespec_tp", "label": "Wavespec Tp", "unit": "s", "category": "prediction"},
+        {"name": "forecast_skill_lead_sec", "label": "Forecast Skill Lead", "unit": "s", "category": "prediction"},
+        {"name": "wavespec_tm01", "label": "Wavespec Tm01", "unit": "s", "category": "prediction"},
+        {"name": "wavespec_tm02", "label": "Wavespec Tm02", "unit": "s", "category": "prediction"},
+        {"name": "wavespec_dp", "label": "Wavespec Dp", "unit": "°", "category": "prediction"},
+        {"name": "wavespec_dm", "label": "Wavespec Dm", "unit": "°", "category": "prediction"},
+        {"name": "wavespec_spreadp", "label": "Wavespec Spread P", "unit": "°", "category": "prediction"},
+        {"name": "forecast_skill_n_scored", "label": "Forecast Skill N Scored", "unit": "count", "category": "prediction"},
+        {"name": "forecast_skill_buoy_0", "label": "Forecast Skill Buoy 0", "unit": "value", "category": "prediction"},
+        {"name": "forecast_skill_buoy_1", "label": "Forecast Skill Buoy 1", "unit": "value", "category": "prediction"},
+        {"name": "forecast_skill_buoy_2", "label": "Forecast Skill Buoy 2", "unit": "value", "category": "prediction"},
+        {"name": "forecast_skill_buoy_3", "label": "Forecast Skill Buoy 3", "unit": "value", "category": "prediction"},
+        {"name": "solve_time_min_s", "label": "Solve Time Min", "unit": "s", "category": "prediction"},
+        {"name": "solve_time_max_s", "label": "Solve Time Max", "unit": "s", "category": "prediction"},
+        {"name": "solve_time_avg_s", "label": "Solve Time Avg", "unit": "s", "category": "prediction"},
+        {"name": "solver_objective", "label": "Solver Objective", "unit": "value", "category": "prediction"},
+        {"name": "num_wavelengths", "label": "Num Wavelengths", "unit": "count", "category": "prediction"},
+        {"name": "has_wavespec_bulk", "label": "Has Wavespec Bulk", "unit": "flag", "category": "prediction"},
+        {"name": "n_measurements", "label": "Measurements", "unit": "count", "category": "prediction"},
+        {"name": "n_windows", "label": "Windows", "unit": "count", "category": "prediction"},
+        {"name": "window_start_time", "label": "Window Start", "unit": "s", "category": "prediction"},
+        {"name": "window_end_time", "label": "Window End", "unit": "s", "category": "prediction"},
     ]
 }
 
@@ -255,8 +311,62 @@ def load_wave_data(paths: list[Path], start: float | None = None, end: float | N
 
 
 def load_nextwave_data(paths: list[Path], start: float | None = None, end: float | None = None) -> pd.DataFrame:
-    """Hook for unprocessed NextWave CSVs; intentionally empty for now."""
-    return pd.DataFrame(columns=["_minute", "nextwave", "nextwave_error", "nextwave_error_2"])
+    """Load per-minute NextWave predictions from the raw nextwave_*.csv logs.
+
+    Every row is floored to its minute. ``nextwave`` carries the most recent log
+    event name forward-filled into each minute. Numeric summary fields (solver /
+    wavespec / forecast-skill, present only on ``nextwave_summary`` rows) are
+    taken from the last summary in each minute and forward-filled between
+    summaries so the series stay continuous.
+    """
+    numeric = [col for col in NEXTWAVE_FIELDS if col != "nextwave"]
+    frames: list[pd.DataFrame] = []
+    for path in paths:
+        df = pd.read_csv(path, low_memory=False, skipinitialspace=True)
+        df.columns = [str(c).strip() for c in df.columns]
+        missing = {"wall_epoch_seconds", "event"} - set(df.columns)
+        if missing:
+            raise ValueError(f"NextWave file {path} is missing columns: {sorted(missing)}")
+        df["wall_epoch_seconds"] = as_number(df["wall_epoch_seconds"], "wall_epoch_seconds", path)
+        df = df.dropna(subset=["wall_epoch_seconds"])
+        if df.empty:
+            continue
+        for col in numeric:
+            if col in df.columns:
+                df[col] = as_number(df[col], col, path)
+        df["event"] = df["event"].astype("string").str.strip()
+        df["_minute"] = pd.to_datetime(df["wall_epoch_seconds"], unit="s", utc=True).dt.floor("min")
+        if start is not None:
+            df = df[df["wall_epoch_seconds"] >= start]
+        if end is not None:
+            df = df[df["wall_epoch_seconds"] < end]
+        frames.append(df)
+    if not frames:
+        return pd.DataFrame(columns=["_minute", *NEXTWAVE_FIELDS])
+    combined = pd.concat(frames, ignore_index=True).sort_values("wall_epoch_seconds")
+    for col in numeric:
+        if col not in combined.columns:
+            combined[col] = np.nan
+    state = (
+        combined[["_minute", "event"]]
+        .dropna(subset=["_minute"])
+        .rename(columns={"event": "nextwave"})
+        .drop_duplicates("_minute", keep="last")
+    )
+    stat_marker = combined["n_measurements"].notna()
+    stats = combined.loc[stat_marker, ["_minute", *numeric]]
+    full = pd.date_range(combined["_minute"].min(), combined["_minute"].max(), freq="min", tz="UTC")
+    rows = {"nextwave": state.set_index("_minute").reindex(full).ffill()["nextwave"]}
+    if stats.empty:
+        for col in numeric:
+            rows[col] = np.nan
+    else:
+        ss = stats.set_index("_minute").reindex(full).ffill()
+        for col in numeric:
+            rows[col] = ss[col]
+    result = pd.DataFrame(rows, index=full)
+    result.index.name = "_minute"
+    return result.reset_index()[["_minute", *NEXTWAVE_FIELDS]]
 
 
 def combine_states(values: list[str]) -> str:
@@ -316,7 +426,7 @@ def build_minute_rows(raw: pd.DataFrame, events: pd.DataFrame, wave: pd.DataFram
             "sea_state_energy": np.nan,
             "efficiency": np.nan,
             "peaks": np.nan,
-            "nextwave": None, "nextwave_error": np.nan, "nextwave_error_2": np.nan,
+            "nextwave": None,
             "_minute": minute,
         })
     result = pd.DataFrame(rows)
@@ -330,9 +440,13 @@ def build_minute_rows(raw: pd.DataFrame, events: pd.DataFrame, wave: pd.DataFram
             result.drop(columns=[f"{col}_wave"], errors="ignore", inplace=True)
     if not nextwave.empty:
         result = result.merge(nextwave, on="_minute", how="left", suffixes=("", "_nextwave"))
-        for col in ("nextwave", "nextwave_error", "nextwave_error_2"):
-            result[col] = result[col].fillna(result.get(f"{col}_nextwave"))
-            result.drop(columns=[f"{col}_nextwave"], errors="ignore", inplace=True)
+        for col in nextwave.columns:
+            if col == "_minute":
+                continue
+            suffixed = f"{col}_nextwave"
+            if suffixed in result.columns:
+                result[col] = result[col].fillna(result[suffixed])
+                result.drop(columns=[suffixed], errors="ignore", inplace=True)
     result["efficiency"] = np.where(
         pd.to_numeric(result["sea_state_energy"], errors="coerce") > 0,
         result["avg_power"] / result["sea_state_energy"] * 100,
@@ -365,22 +479,18 @@ def hourly_from_minutes(minutes: pd.DataFrame) -> pd.DataFrame:
         expected = pd.date_range(hour, periods=60, freq="min", tz="UTC")
         if len(group) != 60 or not times.reset_index(drop=True).equals(expected.to_series().reset_index(drop=True)):
             continue
-        rows.append({
+        row = {
             "timestamp_ns": int(hour.value),
             "timestamp_iso": hour.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "controller": combine_states(group["controller"].tolist()),
-            "hs": group["hs"].mean(), "tp": group["tp"].mean(),
-            "avg_power": group["avg_power"].mean(), "power_in": group["power_in"].mean(),
-            "power_to_controller": group["power_to_controller"].mean(),
-            "battery_voltage": group["battery_voltage"].mean(),
-            "battery_pct": group["battery_pct"].mean(),
-            "sea_state_energy": group["sea_state_energy"].mean(),
-            "efficiency": group["efficiency"].mean(),
-            "peaks_total": group["peaks"].mean(),
             "nextwave": combine_states(group["nextwave"].tolist()),
-            "nextwave_error": group["nextwave_error"].mean(),
-            "nextwave_error_2": group["nextwave_error_2"].mean(),
-        })
+            "peaks_total": group["peaks"].mean(),
+        }
+        for col in OVERVIEW_FIELDS:
+            if col in row:
+                continue
+            row[col] = group[col].mean() if col in group else np.nan
+        rows.append(row)
     return round_output(pd.DataFrame(rows), OVERVIEW_FIELDS)
 
 
@@ -450,9 +560,11 @@ def rebuild_overview(output_data: Path, start: float, end: float) -> None:
 
 def initialize_static_files(output_root: Path) -> None:
     config = output_root / "config" / "chartTypes.json"
-    if not config.exists():
-        config.parent.mkdir(parents=True, exist_ok=True)
-        config.write_text(json.dumps(CHART_TYPES_CONFIG, indent=2) + "\n", encoding="utf-8")
+    text = json.dumps(CHART_TYPES_CONFIG, indent=2) + "\n"
+    if config.exists() and config.read_text(encoding="utf-8") == text:
+        return
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(text, encoding="utf-8")
 
 
 def update_manifest(output_root: Path) -> None:

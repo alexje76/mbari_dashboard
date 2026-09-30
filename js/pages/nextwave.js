@@ -24,9 +24,17 @@ import { getColor } from '../shared/colorScheme.js';
 
 const BASE_PATH = '/mbari_dashboard';
 
-// NextWave State -> axis positions (three ordered bands).
-const STATE_POSITIONS = { Off: 1, Starting: 2, On: 3 };
-const POSITION_NAMES = { 1: 'Off', 2: 'Starting', 3: 'On' };
+// Curated default stacked-chart selection when no chartTypes URL param is set.
+// Priority metrics (state, forecast skill mean, solver error) plus a few
+// wave-context fields; the full set stays selectable via the chart checkboxes.
+const DEFAULT_PREDICTION_CHARTS = [
+  'nextwave',
+  'forecast_skill_mean',
+  'solver_error',
+  'wavespec_hs',
+  'wavespec_tp',
+  'forecast_skill_lead_sec',
+];
 
 let currentData = [];
 let visibleRows = [];
@@ -90,8 +98,8 @@ async function loadChartTypes() {
 }
 
 /**
- * Restore the selected stacked charts from the URL, defaulting to all
- * prediction columns. Unknown names are dropped.
+ * Restore the selected stacked charts from the URL, defaulting to the curated
+ * priority subset. Unknown names are dropped.
  */
 function restoreChartSelection() {
   const urlParams = getURLParams();
@@ -103,7 +111,9 @@ function restoreChartSelection() {
       urlParams.chartTypes.filter((name) => predictionNames.includes(name))
     );
   } else {
-    selectedCharts = new Set(predictionNames);
+    selectedCharts = new Set(
+      predictionNames.filter((name) => DEFAULT_PREDICTION_CHARTS.includes(name))
+    );
   }
 }
 
@@ -121,9 +131,9 @@ function numericColumns() {
 }
 
 function scatterYColumns() {
-  return ['nextwave_error', 'nextwave_error_2', 'nextwave']
-    .map((name) => chartTypesConfig[name])
-    .filter(Boolean);
+  return Object.values(chartTypesConfig).filter(
+    (col) => col.category === 'prediction'
+  );
 }
 
 /**
@@ -144,7 +154,7 @@ function setupScatterSelects() {
     : 'sea_state_energy';
   ySelect.value = scatterYColumns().some((col) => col.name === scatterY)
     ? scatterY
-    : 'nextwave_error';
+    : 'forecast_skill_mean';
 
   scatterX = xSelect.value;
   scatterY = ySelect.value;
@@ -417,8 +427,29 @@ function buildChartOption(col) {
 }
 
 /**
+ * Map the distinct NextWave state categories present in the rows to ordered
+ * axis positions (1..N). Real data carries the log's event names (e.g.
+ * nextwave_summary, nextwave_running); synthetic data uses On/Starting/Off.
+ */
+function statePositions(rows) {
+  const categories = [
+    ...new Set(
+      rows
+        .map((row) => row.nextwave)
+        .filter((value) => value !== '' && value != null)
+    ),
+  ].sort();
+  return {
+    count: categories.length,
+    toPosition: (value) =>
+      categories.indexOf(value) >= 0 ? categories.indexOf(value) + 1 : null,
+    toName: (position) => categories[position - 1] || '',
+  };
+}
+
+/**
  * Build the scatter-chart option: X metric vs Y metric, colored per controller.
- * The NextWave State metric maps to the three axis positions.
+ * The NextWave State metric maps to ordered category bands.
  */
 function renderScatterChart() {
   const chart = document.getElementById('chartScatter');
@@ -436,9 +467,10 @@ function renderScatterChart() {
   const yConfig = chartTypesConfig[scatterY];
   const xIsState = scatterX === 'nextwave';
   const yIsState = scatterY === 'nextwave';
+  const stateMap = statePositions(visibleRows);
 
   const axisValue = (row, isState, metric) =>
-    isState ? STATE_POSITIONS[row[metric]] : toNumber(row[metric]);
+    isState ? stateMap.toPosition(row[metric]) : toNumber(row[metric]);
 
   const controllerIndex = new Map(
     getUniqueControllers(currentData).map((name, index) => [name, index])
@@ -470,10 +502,10 @@ function renderScatterChart() {
       ? {
           type: 'value',
           min: 1,
-          max: 3,
+          max: Math.max(stateMap.count, 2),
           interval: 1,
           name: 'State',
-          axisLabel: { formatter: (value) => POSITION_NAMES[value] || '' },
+          axisLabel: { formatter: (value) => stateMap.toName(value) },
         }
       : {
           type: 'value',
@@ -481,7 +513,7 @@ function renderScatterChart() {
         };
 
   const option = {
-    tooltip: { trigger: 'item', formatter: scatterTooltipFormatter(xConfig, yConfig, xIsState, yIsState) },
+    tooltip: { trigger: 'item', formatter: scatterTooltipFormatter(xConfig, yConfig, xIsState, yIsState, stateMap) },
     legend: {
       type: 'scroll',
       data: series.map((s) => s.name),
@@ -499,13 +531,13 @@ function renderScatterChart() {
   initChart('chartScatter', option);
 }
 
-function scatterTooltipFormatter(xConfig, yConfig, xIsState, yIsState) {
+function scatterTooltipFormatter(xConfig, yConfig, xIsState, yIsState, stateMap) {
   return (params) => {
     const point = params.data || {};
     const [x, y] = point.value || [];
     const format = (value, isState, metric) =>
       isState
-        ? POSITION_NAMES[value] || String(value)
+        ? stateMap.toName(value) || String(value)
         : `${Number(value).toFixed(2)}${metric?.unit ? ` ${metric.unit}` : ''}`;
     const lines = [
       point.row?.timestamp_iso ? `<b>${point.row.timestamp_iso}</b>` : '',

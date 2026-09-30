@@ -337,8 +337,8 @@ function downsampleToHourly(data) {
           efficiency: [],
           peaks_total: 0,
           nextwave: row.nextwave || '',
-          nextwave_error: [],
-          nextwave_error_2: [],
+          forecast_skill_mean: [],
+          solver_error: [],
         });
       }
 
@@ -355,8 +355,8 @@ function downsampleToHourly(data) {
       if (row.sea_state_energy) hourData.sea_state_energy.push(parseFloat(row.sea_state_energy));
       if (row.efficiency) hourData.efficiency.push(parseFloat(row.efficiency));
       if (row.peaks) hourData.peaks_total += parseInt(row.peaks);
-      if (row.nextwave_error) hourData.nextwave_error.push(parseFloat(row.nextwave_error));
-      if (row.nextwave_error_2) hourData.nextwave_error_2.push(parseFloat(row.nextwave_error_2));
+      if (row.forecast_skill_mean) hourData.forecast_skill_mean.push(parseFloat(row.forecast_skill_mean));
+      if (row.solver_error) hourData.solver_error.push(parseFloat(row.solver_error));
     } catch (error) {
       console.warn('Error processing row:', error);
     }
@@ -378,8 +378,8 @@ function downsampleToHourly(data) {
     efficiency: hour.efficiency.length > 0 ? (hour.efficiency.reduce((a, b) => a + b, 0) / hour.efficiency.length).toFixed(2) : null,
     peaks_total: hour.peaks_total,
     nextwave: hour.nextwave,
-    nextwave_error: hour.nextwave_error.length > 0 ? (hour.nextwave_error.reduce((a, b) => a + b, 0) / hour.nextwave_error.length).toFixed(2) : null,
-    nextwave_error_2: hour.nextwave_error_2.length > 0 ? (hour.nextwave_error_2.reduce((a, b) => a + b, 0) / hour.nextwave_error_2.length).toFixed(2) : null,
+    forecast_skill_mean: hour.forecast_skill_mean.length > 0 ? (hour.forecast_skill_mean.reduce((a, b) => a + b, 0) / hour.forecast_skill_mean.length).toFixed(2) : null,
+    solver_error: hour.solver_error.length > 0 ? (hour.solver_error.reduce((a, b) => a + b, 0) / hour.solver_error.length).toFixed(2) : null,
   }));
 
   return result;

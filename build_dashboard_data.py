@@ -6,8 +6,9 @@ not merged by Source ID); analytics are calculated only from rows containing
 the required signal. Controller logs are joined by wall-clock epoch time.
 
 The wave loader is intentionally a no-op until its schema is available; the
-NextWave loader reads the raw nextwave_*.csv logs (see load_nextwave_data).
-Replace load_wave_data without changing the aggregation code.
+NextWave loader reads the raw nextwave_*.csv logs (see load_nextwave_data), and
+Hs/Tp default to the measured wavespectrum those logs carry. Replace
+load_wave_data without changing the aggregation code.
 """
 from __future__ import annotations
 
@@ -90,7 +91,7 @@ CHART_TYPES_CONFIG = {
         {"name": "power_to_controller", "label": "Power to Controller", "unit": "W", "category": "power"},
         {"name": "battery_voltage", "label": "Battery Voltage", "unit": "V", "category": "power"},
         {"name": "battery_pct", "label": "Battery %", "unit": "%", "category": "power"},
-        {"name": "sea_state_energy", "label": "Sea State Energy", "unit": "J/m²", "category": "wave"},
+        {"name": "sea_state_energy", "label": "Sea State Energy", "unit": "W", "category": "wave"},
         {"name": "hs", "label": "Wave Height (Hs)", "unit": "m", "category": "wave"},
         {"name": "tp", "label": "Wave Period (Tp)", "unit": "s", "category": "wave"},
         {"name": "peaks", "label": "Peaks", "unit": "count", "category": "system"},
@@ -287,6 +288,19 @@ LEAD_ACID_BANK_SOC_CURVE = (
 )
 
 
+# Incident deep-water wave power on the deployed WEC. Narrow-band derivation:
+# spectral variance m0 = Hs^2/16 and group velocity c_g = g*Tp/(4*pi), so the
+# energy flux per unit crest length is rho*g^2*Hs^2*Tp/(64*pi) [W/m]; multiplying
+# by the device width gives the total incident power [W]. Keep in sync with
+# SyntheticData/generate_synthetic_data.py.
+RHO_WATER_KG_M3 = 1025.0
+GRAVITY_M_S2 = 9.80665
+WEC_WIDTH_M = 2.6
+SEA_STATE_ENERGY_COEFF = (
+    RHO_WATER_KG_M3 * GRAVITY_M_S2 ** 2 / (64.0 * np.pi) * WEC_WIDTH_M
+)
+
+
 def voltage_to_percent(voltage: float | pd.Series, curve=LEAD_ACID_BANK_SOC_CURVE):
     """Swappable voltage-to-charge lookup for the 288 V lead-acid bank.
 
@@ -306,7 +320,13 @@ def voltage_to_percent(voltage: float | pd.Series, curve=LEAD_ACID_BANK_SOC_CURV
 
 
 def load_wave_data(paths: list[Path], start: float | None = None, end: float | None = None) -> pd.DataFrame:
-    """Hook for processed Hs/Tp/sea-state/peaks CSVs; intentionally empty for now."""
+    """Hook for processed Hs/Tp/sea-state/peaks CSVs; intentionally empty for now.
+
+    While this returns an empty frame, Hs/Tp come from the measured wavespectrum
+    in the NextWave logs (``wavespec_hs``/``wavespec_tp``) and the incident wave
+    power is derived from it. Anything returned here still wins, because
+    ``build_minute_rows`` only fills those columns where they are empty.
+    """
     return pd.DataFrame(columns=["_minute", "hs", "tp", "sea_state_energy", "peaks"])
 
 
@@ -447,6 +467,15 @@ def build_minute_rows(raw: pd.DataFrame, events: pd.DataFrame, wave: pd.DataFram
             if suffixed in result.columns:
                 result[col] = result[col].fillna(result[suffixed])
                 result.drop(columns=[suffixed], errors="ignore", inplace=True)
+    # Hs/Tp default to the measured wavespectrum carried by the NextWave window
+    # summaries; only fill where a wave loader left them empty.
+    for src, dst in (("wavespec_hs", "hs"), ("wavespec_tp", "tp")):
+        if src in result.columns:
+            result[dst] = result[dst].fillna(pd.to_numeric(result[src], errors="coerce"))
+    hs = pd.to_numeric(result["hs"], errors="coerce")
+    tp = pd.to_numeric(result["tp"], errors="coerce")
+    incident = pd.Series(SEA_STATE_ENERGY_COEFF * hs**2 * tp).where((hs > 0) & (tp > 0))
+    result["sea_state_energy"] = pd.to_numeric(result["sea_state_energy"], errors="coerce").fillna(incident)
     result["efficiency"] = np.where(
         pd.to_numeric(result["sea_state_energy"], errors="coerce") > 0,
         result["avg_power"] / result["sea_state_energy"] * 100,

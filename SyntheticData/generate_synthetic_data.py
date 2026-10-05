@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import random
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -77,6 +78,16 @@ CONTROLLERS = (
 CONTROLLER_LOG_FIELDS = ["wall_epoch_seconds", "ros_seconds", "event", "controller"]
 NEXTWAVE_STATES = ("On", "Starting", "Off")
 
+# Incident deep-water wave power on the deployed WEC: the narrow-band flux
+# rho*g^2*Hs^2*Tp/(64*pi) [W/m] times the device width. Keep in sync with
+# SEA_STATE_ENERGY_COEFF in build_dashboard_data.py.
+RHO_WATER_KG_M3 = 1025.0
+GRAVITY_M_S2 = 9.80665
+WEC_WIDTH_M = 2.6
+SEA_STATE_ENERGY_COEFF = (
+    RHO_WATER_KG_M3 * GRAVITY_M_S2 ** 2 / (64.0 * math.pi) * WEC_WIDTH_M
+)
+
 CHART_TYPES_CONFIG = {
     "chartTypes": [
         {"name": "avg_power", "label": "Avg Power", "unit": "W", "category": "power"},
@@ -85,7 +96,7 @@ CHART_TYPES_CONFIG = {
         {"name": "power_to_controller", "label": "Power to Controller", "unit": "W", "category": "power"},
         {"name": "battery_voltage", "label": "Battery Voltage", "unit": "V", "category": "power"},
         {"name": "battery_pct", "label": "Battery %", "unit": "%", "category": "power"},
-        {"name": "sea_state_energy", "label": "Sea State Energy", "unit": "J/m²", "category": "wave"},
+        {"name": "sea_state_energy", "label": "Sea State Energy", "unit": "W", "category": "wave"},
         {"name": "hs", "label": "Wave Height (Hs)", "unit": "m", "category": "wave"},
         {"name": "tp", "label": "Wave Period (Tp)", "unit": "s", "category": "wave"},
         {"name": "peaks", "label": "Peaks", "unit": "count", "category": "system"},
@@ -200,8 +211,9 @@ def sea_state_series(rng: random.Random, total_minutes: int) -> Iterator[tuple[f
         yield round(hs, 3), round(tp, 3)
 
 
-def sea_state_energy(hs: float, tp: float, rng: random.Random) -> float:
-    return round(0.5 * hs ** 2 * tp * rng.uniform(0.9, 1.1), 2)
+def sea_state_energy(hs: float, tp: float) -> float:
+    """Incident deep-water wave power on WEC_WIDTH_M of wave front [W]."""
+    return round(SEA_STATE_ENERGY_COEFF * hs ** 2 * tp, 2)
 
 
 def calculate_efficiency(avg_power: float, sea_state_e: float) -> float:
@@ -281,15 +293,18 @@ def nextwave_state_series(rng: random.Random, total_minutes: int) -> Iterator[tu
 
 
 def fabricate_nextwave_stats(rng: random.Random, hs: float, tp: float, minute_of_run: int) -> dict:
-    """Fabricate window-summary statistics for one On/Starting minute."""
-    t = round(tp * (1 + rng.uniform(-0.05, 0.05)), 2)
-    h = round(hs * (1 + rng.uniform(-0.05, 0.05)), 2)
+    """Fabricate window-summary statistics for one On/Starting minute.
+
+    ``wavespec_hs``/``wavespec_tp`` are the measured wavespectrum the summary
+    reports, so they equal the row's Hs/Tp exactly -- the real pipeline derives
+    ``hs``/``tp`` from these two columns.
+    """
     run_seconds = minute_of_run * 60
     return {
-        "wavespec_hs": h,
-        "wavespec_tp": t,
-        "wavespec_tm01": round(t * rng.uniform(0.7, 0.85), 2),
-        "wavespec_tm02": round(t * rng.uniform(0.8, 0.9), 2),
+        "wavespec_hs": hs,
+        "wavespec_tp": tp,
+        "wavespec_tm01": round(tp * rng.uniform(0.7, 0.85), 2),
+        "wavespec_tm02": round(tp * rng.uniform(0.8, 0.9), 2),
         "wavespec_dp": rng.randint(20, 340),
         "wavespec_dm": rng.randint(20, 340),
         "wavespec_spreadp": round(rng.uniform(10, 60), 2),
@@ -322,7 +337,7 @@ def generate_minute_rows(rng: random.Random, start: datetime, total_minutes: int
     ):
         timestamp = start + timedelta(minutes=i)
         nw_state, nw_skill, nw_solver = nextwave
-        sse = sea_state_energy(hs, tp, rng)
+        sse = sea_state_energy(hs, tp)
         stats = {} if nw_state == "Off" else fabricate_nextwave_stats(rng, hs, tp, i)
         yield {
             "timestamp_ns": ros2_ns(timestamp),

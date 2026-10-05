@@ -458,7 +458,10 @@ function renderScatterChart() {
 
   if (!visibleRows.length) {
     disposeChart('chartScatter');
-    if (empty) empty.hidden = false;
+    if (empty) {
+      empty.textContent = 'No controller data in range.';
+      empty.hidden = false;
+    }
     return;
   }
   if (empty) empty.hidden = true;
@@ -471,6 +474,22 @@ function renderScatterChart() {
 
   const axisValue = (row, isState, metric) =>
     isState ? stateMap.toPosition(row[metric]) : toNumber(row[metric]);
+
+  const metricLabel = (config, metric) => config?.label || metric;
+  const usableOn = (isState, metric) =>
+    visibleRows.filter((row) => Number.isFinite(axisValue(row, isState, metric))).length;
+  const emptyAxes = [
+    xIsState || usableOn(xIsState, scatterX) ? null : `X: ${metricLabel(xConfig, scatterX)}`,
+    yIsState || usableOn(yIsState, scatterY) ? null : `Y: ${metricLabel(yConfig, scatterY)}`,
+  ].filter(Boolean);
+  if (emptyAxes.length) {
+    disposeChart('chartScatter');
+    if (empty) {
+      empty.textContent = `No data for ${emptyAxes.join(' and ')} in the selected range. Pick another metric.`;
+      empty.hidden = false;
+    }
+    return;
+  }
 
   const controllerIndex = new Map(
     getUniqueControllers(currentData).map((name, index) => [name, index])

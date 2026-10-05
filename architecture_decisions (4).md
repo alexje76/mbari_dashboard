@@ -28,9 +28,10 @@ A **GitHub Action** (`.github/workflows/test-auto-update.yml`, daily cron + manu
 - `timestamp_iso` — human-readable ISO8601 convenience column (e.g., `2026-10-05T12:34:56Z`).
 - `controller` — string enum (real telemetry: `free_response`, `stepwise_random_bounded`, `stepwise_integrated_bounded`; synthetic: the same keys prefixed `synthetic_`); dynamically read from CSV, not hardcoded. Persists in multi-hour blocks. `build_dashboard_data.py` maps both key sets to display labels via `CONTROLLER_LABELS` (kept in sync with the synthetic generator's `CONTROLLERS` constant).
 
-### Environmental/Wave Data (persist in ~30-min blocks)
-- `hs` — float, 0–3 (wave height, meters).
-- `tp` — float, 1–14 (wave period, seconds).
+### Environmental/Wave Data
+- `hs` — float, significant wave height (m) from the **measured** wavespectrum.
+- `tp` — float, peak period (s) from the same measured wavespectrum.
+- Both come from the NextWave window summaries' `wavespec_hs` / `wavespec_tp` (the source of truth, forward-filled between summaries so the sea-state axis is stepwise), filled in `build_minute_rows()` only where the wave loader left them empty. Historical synthetic data fabricated them on ~30-min blocks; the real pipeline's range is whatever the sea state produces.
 
 ### Power & Energy (per-minute or per-record)
 - `avg_power` — float, signed battery-bus power (watts). Negative = discharging from the battery to the power controller; positive = charging.
@@ -38,8 +39,8 @@ A **GitHub Action** (`.github/workflows/test-auto-update.yml`, daily cron + manu
 - `power_to_controller` — float, magnitude of the discharging half of `avg_power` = `|min(avg_power, 0)|` (watts flowing battery → power controller). Replaces the earlier random 0–600 W `power_out` placeholder.
 - `battery_voltage` — float, volts, raw minute-mean of the battery-controller bank voltage (from `BC Voltage`). Stored so the exact charge curve can be swapped later without reprocessing telemetry.
 - `battery_pct` — float, 0–100, derived from battery voltage via a **swappable piecewise-linear voltage→SoC curve** for the 288 V lead-acid bank (24 × 12 V, 6 × 2 V cells each; operating range ~288 V depleted → ~325 V float charge). Readings outside the curve span (e.g. transient spikes) map to NaN, not clamped 0/100. Exact charge curve swaps in later.
-- `sea_state_energy` — float, J/m² (wave energy density, derived from Hs and Tp using simplified formula: E ≈ 0.5 × Hs² × Tp with random variation).
-- `efficiency` — float, 0–100+ % (calculated as `(avg_power / sea_state_energy) × 100`, **not clamped**).
+- `sea_state_energy` — float, watts: the incident deep-water wave power on the deployed 2.6 m WEC, i.e. the narrow-band flux `ρ·g²·Hs²·Tp/(64π)` [W/m] × `WEC_WIDTH_M`. Constants live in `build_dashboard_data.py` (`RHO_WATER_KG_M3 = 1025`, `GRAVITY_M_S2 = 9.80665`, `WEC_WIDTH_M = 2.6`, giving `SEA_STATE_ENERGY_COEFF ≈ 1275.6`) and are duplicated in `SyntheticData/generate_synthetic_data.py`; leave NaN when Hs or Tp is missing.
+- `efficiency` — float, 0–100+ % (calculated as `(avg_power / sea_state_energy) × 100`, **not clamped**). Because the energy is the incident power on a known width, this reads as the captured fraction of that width — effectively a capture-width percentage.
 
 ### System State
 - `peaks` — int, 1–3 (independent per-minute, or summed hourly for overview).
@@ -84,8 +85,9 @@ Python script for synthetic minute-resolution telemetry. Usage:
 - **Hs & Tp:** Drifting log-space mean reversion (smooth, positively skewed sea states).
 - **Avg power:** Uniform -30 to 200 W per controller; `power_in`/`power_to_controller` are the positive/negative halves (`power_in = max(avg_power, 0)`, `power_to_controller = |min(avg_power, 0)|`).
 - **Battery Pct:** Synthetic sawtooth — smooth discharge (0.005–0.035% per min) with periodic charging cycles (every 12–20 hrs, lasting 2–5 hrs). Emits `battery_voltage` consistent with the sawtooth via `percent_to_voltage()`, the inverse of the same `LEAD_ACID_BANK_SOC_CURVE` table (duplicated in both generators; keep in sync).
-- **Sea State Energy:** `0.5 × Hs² × Tp × random(0.9, 1.1)`.
-- **Efficiency:** `(avg_power / sea_state_energy) × 100`, unclamped.
+- **Sea State Energy:** `SEA_STATE_ENERGY_COEFF × Hs² × Tp` with the same constants as the real pipeline (`ρ·g²/(64π) × WEC_WIDTH_M ≈ 1275.6`), so synthetic and real rows share units. The old `0.5 × Hs² × Tp × random(0.9, 1.1)` jitter is gone — the sea-state series already varies.
+- **Efficiency:** `(avg_power / sea_state_energy) × 100`, unclamped (capture-width percent).
+- **Wavespec:** `wavespec_hs`/`wavespec_tp` are emitted equal to the row's Hs/Tp, mirroring the real logs where those columns are the measured spectrum that `hs`/`tp` are derived from.
 - **NextWave State:** Cycles between On/Starting/Off, stays per state 30–120 min.
 - **NextWave Errors:** Smooth variation with occasional spikes.
 - **Peaks:** Random 1–3 per minute (summed to `peaks_total` per hour in overview).
@@ -97,7 +99,7 @@ Real ingestion pipeline (the "GitHub Action" step): reads raw telemetry CSVs (10
 - `battery_voltage` = minute mean of `BC Voltage` (Battery Controller, Source ID 0).
 - `battery_pct` = `voltage_to_percent(BC Voltage)` — piecewise-linear lead-acid curve, swappable via the `LEAD_ACID_BANK_SOC_CURVE` table at the top of the file. Values outside the curve span become NaN (sanity filter for the observed 141 V transient spikes).
 - `power_in` / `power_to_controller` split as above.
-- NextWave metrics come from the raw `nextwave_*.csv` logs via `load_nextwave_data()` (see "Next Wave Prediction" above); the wave loader is still a placeholder until its raw schema is known.
+- NextWave metrics come from the raw `nextwave_*.csv` logs via `load_nextwave_data()` (see "Next Wave Prediction" above); `load_wave_data()` is still a placeholder returning an empty frame, so Hs/Tp are filled from the NextWave logs' measured wavespectrum and `sea_state_energy` is derived from them. Any frame the wave loader does return wins — the fill only touches columns that are still empty.
 - **Incremental rebuild window:** derived from the files whose content changed (tracked by `.dashboard_state.json` fingerprints). Changed telemetry files contribute their own `[min, max]`; a changed or removed `controller`/`nextwave`/`wave` log extends the window from that log's first event to the end of telemetry, so forward-filled NextWave values stay consistent and deleted logs clear their columns. The window is clamped to the telemetry range, and a run where only `additional` CSVs changed leaves the dashboard files untouched.
 - **State paths are input-root-relative:** the keys stored in `.dashboard_state.json` are relative to `--input-dir` and are re-joined with it when reading (`source()` in `build()`), so the committed fingerprint cache works identically on Windows and CI regardless of the working directory.
 
@@ -268,7 +270,7 @@ Real ingestion pipeline (the "GitHub Action" step): reads raw telemetry CSVs (10
   - Visual indication (● filled vs. ◯ hollow) shows which sea states exist within the currently selected time range on the main charts.
   - User can click individual grid cells to toggle sea state selection; a "Select All/Deselect All" button toggles the full set. Box-draw selection is specified but *not yet built* (desktop target).
   - When a sea state is deselected, those rows are dropped from all three charts' series. Hatched light-grey overlays over deselected-sea-state-only sections are specified but *not yet built*; deselected *controller* runs currently show as solid-grey vertical gaps instead (controller solid grey **is** built).
-  - **No-sea-state fallback:** when a dataset has no Hs/Tp columns at all (e.g. real-pipeline output before the wave loader lands), the sea-state scatter shows an "No sea-state data in range" note with the toggle disabled, and the timeline charts use *every* row (sea-state filter bypassed). The filter re-engages as soon as any sea-state point exists.
+  - **No-sea-state fallback:** when a dataset has no Hs/Tp values at all (only possible if the NextWave logs carry no wavespectrum for the range), the sea-state scatter shows an "No sea-state data in range" note with the toggle disabled, and the timeline charts use *every* row (sea-state filter bypassed). The filter re-engages as soon as any sea-state point exists.
 
 - **Charts (3, stacked vertically):**
   - All three charts share X-axis (time); Y-axes independent.
@@ -361,7 +363,7 @@ Real ingestion pipeline (the "GitHub Action" step): reads raw telemetry CSVs (10
 - All selected charts displayed as stacked vertical sections.
 - Shared X-axis zoom (Y-axes independent) — synced across the stacked charts via `syncChartZoom`.
 - The `nextwave` state column plots on a categorical y-axis; numeric prediction columns plot as value-axis lines with area fill.
-- **Prediction Scatter (`#chartScatter`):** one `scatter` series per controller, `[x, y]` per-minute points. X-axis selectable among the numeric metrics from `chartTypes.json` (`#scatterXAxis`); Y-axis selectable among all `prediction` columns (`#scatterYAxis`). When the state metric is on an axis it maps to ordered bands derived from the distinct categories present in the visible rows (real: `nextwave_summary`/`nextwave_running`/…; synthetic: `Off`/`Starting`/`On`) — value axis, ticks labeled with the category names. Axis choices persist via `scatterX`/`scatterY` URL params; defaults `sea_state_energy` / `forecast_skill_mean`.
+- **Prediction Scatter (`#chartScatter`):** one `scatter` series per controller, `[x, y]` per-minute points. X-axis selectable among the numeric metrics from `chartTypes.json` (`#scatterXAxis`); Y-axis selectable among all `prediction` columns (`#scatterYAxis`). When the state metric is on an axis it maps to ordered bands derived from the distinct categories present in the visible rows (real: `nextwave_summary`/`nextwave_running`/…; synthetic: `Off`/`Starting`/`On`) — value axis, ticks labeled with the category names. Axis choices persist via `scatterX`/`scatterY` URL params; defaults `sea_state_energy` / `forecast_skill_mean`. If either axis metric has no finite values across the visible rows, the chart is disposed and `#scatterEmpty` names the offending axis/metric instead of drawing an empty plot.
 - **Controller Selector (`#scatterControllerCheckboxes`):** mirrors the selector page's checkbox+swatch pattern; unchecking a controller excludes its rows from *all* charts on the page (stacked + scatter). Selection persists via the shared `controllers` URL param and defaults to all controllers in range. A "No controller data in range." note replaces the scatter when nothing remains.
 - Date range: defaults to past 2 days.
 
@@ -501,7 +503,7 @@ Each page (e.g., `selector.js`) handles:
     {"name": "power_to_controller", "label": "Power to Controller", "unit": "W", "category": "power"},
     {"name": "battery_voltage", "label": "Battery Voltage", "unit": "V", "category": "power"},
     {"name": "battery_pct", "label": "Battery %", "unit": "%", "category": "power"},
-    {"name": "sea_state_energy", "label": "Sea State Energy", "unit": "J/m²", "category": "wave"},
+    {"name": "sea_state_energy", "label": "Sea State Energy", "unit": "W", "category": "wave"},
     {"name": "hs", "label": "Wave Height (Hs)", "unit": "m", "category": "wave"},
     {"name": "tp", "label": "Wave Period (Tp)", "unit": "s", "category": "wave"},
     {"name": "peaks", "label": "Peaks", "unit": "count", "category": "system"},

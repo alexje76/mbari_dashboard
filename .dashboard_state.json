@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "files": {
+    "controller_logs/controller_2026-09-30_005528_103088Z.csv": {
+      "kind": "controller",
+      "min": 1790729728.1065235,
+      "max": 1790730652.865058,
+      "fingerprint": {
+        "size": 1618,
+        "mtime_ns": 1791167296467521550
+      }
+    },
+    "controller_logs/nextwave_2026-09-30_005528_103841Z.csv": {
+      "kind": "nextwave",
+      "min": 1790729728.106629,
+      "max": 1790730613.3811984,
+      "fingerprint": {
+        "size": 6488,
+        "mtime_ns": 1791167296467600718
+      }
+    },
+    "telemetry/2026.09.29T05.51.47.csv": {
+      "kind": "telemetry",
+      "min": 1790729507.785,
+      "max": 1790730535.845,
+      "fingerprint": {
+        "size": 8730128,
+        "mtime_ns": 1791167296489808752
+      }
+    }
+  }
+}

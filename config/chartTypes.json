@@ -39,7 +39,7 @@
     {
       "name": "sea_state_energy",
       "label": "Sea State Energy",
-      "unit": "J/m\u00b2",
+      "unit": "W",
       "category": "wave"
     },
     {
